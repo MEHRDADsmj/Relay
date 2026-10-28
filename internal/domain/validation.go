@@ -30,6 +30,13 @@ const (
 	MaxLeaseDuration = 15 * time.Minute
 	MinMaxJobs       = 1
 	MaxMaxJobs       = 100
+
+	// MaxLeaseWait is the maximum long-poll duration for leases.
+	MaxLeaseWait = 30 * time.Second
+
+	DefaultRetryAllDeadLimit = 1000
+	MinRetryAllDeadLimit     = 1
+	MaxRetryAllDeadLimit     = 10_000
 )
 
 var (
@@ -144,6 +151,36 @@ func ValidateWorkerID(id string) error {
 		return validationErrorf("worker_id", "must be printable ASCII")
 	}
 	return nil
+}
+
+// NormalizePageLimit defaults 0 to DefaultPageLimit and validates MinPageLimit..MaxPageLimit.
+func NormalizePageLimit(limit int) (int, error) {
+	if limit == 0 {
+		return DefaultPageLimit, nil
+	}
+	if limit < MinPageLimit || limit > MaxPageLimit {
+		return 0, validationErrorf("limit", "must be between 1 and 200")
+	}
+	return limit, nil
+}
+
+// NormalizeLeaseWait defaults unset values and validates 0..MaxLeaseWait.
+func NormalizeLeaseWait(d time.Duration) (time.Duration, error) {
+	if d < 0 || d > MaxLeaseWait {
+		return 0, validationErrorf("wait", "must be between 0s and 30s")
+	}
+	return d, nil
+}
+
+// NormalizeRetryAllDeadLimit defaults 0 to 1000 and validates 1..10000.
+func NormalizeRetryAllDeadLimit(n int) (int, error) {
+	if n == 0 {
+		return DefaultRetryAllDeadLimit, nil
+	}
+	if n < MinRetryAllDeadLimit || n > MaxRetryAllDeadLimit {
+		return 0, validationErrorf("limit", "must be between 1 and 10000")
+	}
+	return n, nil
 }
 
 // TruncateErrorMessage truncates to MaxErrorMessageBytes without splitting a UTF-8 rune.
