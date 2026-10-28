@@ -97,7 +97,8 @@ deps: ## start postgres + redis only
 	docker compose up -d postgres redis
 
 demo: up ## run demo producer
-	COMPOSE_GOPROXY=$(COMPOSE_GOPROXY) docker compose --profile demo run --rm example-producer
+	# --no-deps: avoid compose run resetting example-worker scale to 1
+	COMPOSE_GOPROXY=$(COMPOSE_GOPROXY) docker compose --profile demo run --rm --no-deps example-producer
 
 check-generated: generate ## fail if generated files drift
 	@git diff --exit-code -- internal/adapter/storage/postgres/sqlcgen internal/adapter/http/oapi || ( \
