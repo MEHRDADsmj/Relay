@@ -23,10 +23,17 @@ func TestKeys(t *testing.T) {
 	assert.Equal(t, "relay:finished", k.Finished())
 	assert.Equal(t, "relay:notify:default", k.NotifyChannel("default"))
 	assert.Equal(t, "relay:notify:*", k.NotifyPattern())
+	assert.Equal(t, "relay:schedule:abc", k.Schedule("abc"))
+	assert.Equal(t, "relay:schedules:by-name", k.SchedulesByName())
+	assert.Equal(t, "relay:schedules:due", k.SchedulesDue())
+	assert.Equal(t, "relay:apikey:abc", k.APIKey("abc"))
+	assert.Equal(t, "relay:apikeys:by-prefix", k.APIKeysByPrefix())
+	assert.Equal(t, "relay:leader:scheduler", k.Leader("scheduler"))
 	assert.Equal(t, "default|abc", LeasedAllMember("default", "abc"))
 
 	custom := NewKeys("myapp")
 	assert.Equal(t, "myapp:job:abc", custom.Job("abc"))
+	assert.Equal(t, "myapp:leader:scheduler", custom.Leader("scheduler"))
 }
 
 func TestReadyScore(t *testing.T) {

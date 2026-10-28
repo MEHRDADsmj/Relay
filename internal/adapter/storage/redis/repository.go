@@ -30,6 +30,14 @@ var (
 	retryScript    = newScript("scripts/retry.lua")
 	reapScript     = newScript("scripts/reap.lua")
 	purgeScript    = newScript("scripts/purge.lua")
+
+	scheduleCreateScript    = newScript("scripts/schedule_create.lua")
+	scheduleUpdateScript    = newScript("scripts/schedule_update.lua")
+	scheduleDeleteScript    = newScript("scripts/schedule_delete.lua")
+	scheduleMarkFiredScript = newScript("scripts/schedule_mark_fired.lua")
+	apiKeyCreateScript      = newScript("scripts/apikey_create.lua")
+	leaderRenewScript       = newScript("scripts/leader_renew.lua")
+	leaderReleaseScript     = newScript("scripts/leader_release.lua")
 )
 
 func mustReadScript(name string) string {

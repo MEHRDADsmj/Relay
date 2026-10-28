@@ -95,6 +95,36 @@ func (k Keys) NotifyPattern() string {
 	return fmt.Sprintf("%s:notify:*", k.prefix)
 }
 
+// Schedule returns relay:schedule:{id}.
+func (k Keys) Schedule(id string) string {
+	return fmt.Sprintf("%s:schedule:%s", k.prefix, id)
+}
+
+// SchedulesByName returns relay:schedules:by-name.
+func (k Keys) SchedulesByName() string {
+	return fmt.Sprintf("%s:schedules:by-name", k.prefix)
+}
+
+// SchedulesDue returns relay:schedules:due.
+func (k Keys) SchedulesDue() string {
+	return fmt.Sprintf("%s:schedules:due", k.prefix)
+}
+
+// APIKey returns relay:apikey:{id}.
+func (k Keys) APIKey(id string) string {
+	return fmt.Sprintf("%s:apikey:%s", k.prefix, id)
+}
+
+// APIKeysByPrefix returns relay:apikeys:by-prefix.
+func (k Keys) APIKeysByPrefix() string {
+	return fmt.Sprintf("%s:apikeys:by-prefix", k.prefix)
+}
+
+// Leader returns relay:leader:{name}.
+func (k Keys) Leader(name string) string {
+	return fmt.Sprintf("%s:leader:%s", k.prefix, name)
+}
+
 // LeasedAllMember returns {queue}|{id}.
 func LeasedAllMember(queue, id string) string {
 	return queue + "|" + id
