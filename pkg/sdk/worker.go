@@ -18,10 +18,13 @@ import (
 const (
 	defaultConcurrency     = 10
 	defaultLeaseDuration   = 30 * time.Second
+	defaultLeaseWait       = 20 * time.Second
+	maxLeaseWait           = 30 * time.Second
 	defaultPollMinInterval = 100 * time.Millisecond
 	defaultPollMaxInterval = 2 * time.Second
 	defaultShutdownTimeout = 30 * time.Second
 	transportBackoffMax    = 5 * time.Second
+	releaseOnShutdownBound = 5 * time.Second
 	maxLeaseBatch          = 100
 	panicStackLimit        = 4096
 )
@@ -33,6 +36,7 @@ type Worker struct {
 
 	mu       sync.Mutex
 	handlers map[string]jobHandler
+	inflight map[string]struct{}
 	running  atomic.Bool
 }
 
@@ -56,6 +60,17 @@ func NewWorker(c *Client, opts WorkerOptions) (*Worker, error) {
 	if opts.LeaseDuration <= 0 {
 		opts.LeaseDuration = defaultLeaseDuration
 	}
+	// LeaseWait: zero → default 20s; negative → disabled (client-side poll).
+	switch {
+	case opts.LeaseWait < 0:
+		opts.LeaseWait = 0
+	case opts.LeaseWait == 0:
+		opts.LeaseWait = defaultLeaseWait
+	default:
+		if opts.LeaseWait > maxLeaseWait {
+			opts.LeaseWait = maxLeaseWait
+		}
+	}
 	if opts.PollMinInterval <= 0 {
 		opts.PollMinInterval = defaultPollMinInterval
 	}
@@ -75,6 +90,7 @@ func NewWorker(c *Client, opts WorkerOptions) (*Worker, error) {
 		client:   c,
 		opts:     opts,
 		handlers: make(map[string]jobHandler),
+		inflight: make(map[string]struct{}),
 	}, nil
 }
 
@@ -113,6 +129,28 @@ func (w *Worker) handlerFor(jobType string) (jobHandler, bool) {
 	return h, ok
 }
 
+func (w *Worker) trackInFlight(id string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.inflight[id] = struct{}{}
+}
+
+func (w *Worker) untrackInFlight(id string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.inflight, id)
+}
+
+func (w *Worker) inFlightIDs() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	ids := make([]string, 0, len(w.inflight))
+	for id := range w.inflight {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // Run leases and processes jobs until ctx is cancelled, then drains in-flight work.
 func (w *Worker) Run(ctx context.Context) error {
 	if !w.running.CompareAndSwap(false, true) {
@@ -141,6 +179,13 @@ func (w *Worker) Run(ctx context.Context) error {
 	if leaseSeconds < 1 {
 		leaseSeconds = 1
 	}
+	waitSeconds := int(w.opts.LeaseWait / time.Second)
+	if waitSeconds < 0 {
+		waitSeconds = 0
+	}
+	if waitSeconds > 30 {
+		waitSeconds = 30
+	}
 
 	for ctx.Err() == nil {
 		free := w.opts.Concurrency - int(inFlight.Load())
@@ -156,7 +201,7 @@ func (w *Worker) Run(ctx context.Context) error {
 			free = maxLeaseBatch
 		}
 
-		jobs, err := w.client.lease(ctx, w.opts.Queue, w.opts.WorkerID, free, leaseSeconds)
+		jobs, err := w.client.lease(ctx, w.opts.Queue, w.opts.WorkerID, free, leaseSeconds, waitSeconds)
 		if err != nil {
 			if ctx.Err() != nil {
 				break
@@ -174,19 +219,27 @@ func (w *Worker) Run(ctx context.Context) error {
 		}
 
 		if len(jobs) == 0 {
-			if !sleepWait(ctx, sleepWithJitter(backoff)) {
-				break
+			if waitSeconds == 0 {
+				// Client-side poll fallback when long-poll is disabled.
+				if !sleepWait(ctx, sleepWithJitter(backoff)) {
+					break
+				}
+				backoff = nextBackoff(backoff, w.opts.PollMinInterval, w.opts.PollMaxInterval)
+			} else {
+				// Server already waited up to wait_seconds; re-lease immediately.
+				backoff = w.opts.PollMinInterval
 			}
-			backoff = nextBackoff(backoff, w.opts.PollMinInterval, w.opts.PollMaxInterval)
 			continue
 		}
 
 		backoff = w.opts.PollMinInterval
 		for _, job := range jobs {
 			inFlight.Add(1)
+			w.trackInFlight(job.ID)
 			wg.Add(1)
 			go func(j apiJob) {
 				defer func() {
+					w.untrackInFlight(j.ID)
 					inFlight.Add(-1)
 					wg.Done()
 					signalSlot()
@@ -210,10 +263,13 @@ shutdown:
 	case <-waitDone:
 		return nil
 	case <-timer.C:
-		// Force-cancel job contexts, then wait a secondary bound for watchers to
-		// release. processJob must not block forever on handlers that ignore
-		// cancel; those invoke goroutines may be abandoned until they return.
+		// Snapshot before cancel so Release still sees jobs as processJob exits.
+		ids := w.inFlightIDs()
 		cancelJobs()
+		releaseCtx, releaseCancel := context.WithTimeout(context.WithoutCancel(ctx), releaseOnShutdownBound)
+		w.releaseJobs(releaseCtx, ids)
+		releaseCancel()
+
 		secondary := time.NewTimer(w.opts.ShutdownTimeout)
 		defer secondary.Stop()
 		select {
@@ -222,6 +278,17 @@ shutdown:
 			w.opts.Logger.Warn("shutdown: abandoning wait for in-flight jobs that ignore cancel")
 		}
 		return ErrShutdownTimeout
+	}
+}
+
+func (w *Worker) releaseJobs(ctx context.Context, ids []string) {
+	for _, id := range ids {
+		if ctx.Err() != nil {
+			return
+		}
+		if err := w.client.release(ctx, id, w.opts.WorkerID); err != nil {
+			w.opts.Logger.Error("release on shutdown failed", "job_id", id, "err", err)
+		}
 	}
 }
 
@@ -254,9 +321,12 @@ func (w *Worker) processJob(workerCtx context.Context, job apiJob, leaseSeconds 
 			return
 		case <-ticker.C:
 			hbCtx, hbCancel := context.WithTimeout(context.WithoutCancel(workerCtx), 5*time.Second)
-			err := w.client.heartbeat(hbCtx, job.ID, w.opts.WorkerID, leaseSeconds)
+			hbJob, err := w.client.heartbeat(hbCtx, job.ID, w.opts.WorkerID, leaseSeconds)
 			hbCancel()
 			if err == nil {
+				if hbJob.CancelRequested {
+					cancel()
+				}
 				continue
 			}
 			if errors.Is(err, ErrLeaseLost) {
@@ -317,7 +387,7 @@ func (w *Worker) reportResult(ctx context.Context, job apiJob, result error) {
 		}
 		return
 	}
-	if err := w.client.fail(reportCtx, job.ID, w.opts.WorkerID, result.Error()); err != nil {
+	if err := w.client.fail(reportCtx, job.ID, w.opts.WorkerID, result.Error(), isPermanent(result)); err != nil {
 		w.opts.Logger.Error("fail failed", "job_id", job.ID, "err", err)
 	}
 }
