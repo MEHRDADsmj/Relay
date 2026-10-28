@@ -198,9 +198,12 @@ func (r *Repository) Claim(ctx context.Context, queue, owner string, limit int, 
 	}
 
 	for _, row := range rows {
-		// Reclaim path: close previous running attempt (if any) as expired.
-		if err := closeRunningAttempt(ctx, qtx, row.ID, domain.AttemptExpired, "", now); err != nil {
-			return nil, err
+		// First claim (attempts==1): no prior running attempt to close. Retry /
+		// lease-reclaim paths have attempts>1 and may still have an open attempt.
+		if row.Attempts > 1 {
+			if err := closeRunningAttempt(ctx, qtx, row.ID, domain.AttemptExpired, "", now); err != nil {
+				return nil, err
+			}
 		}
 		if err := insertRunningAttempt(ctx, qtx, row.ID, row.Attempts, owner, now); err != nil {
 			return nil, err

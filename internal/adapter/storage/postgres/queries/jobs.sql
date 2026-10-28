@@ -55,6 +55,42 @@ WHERE queue = sqlc.arg(queue)
 RETURNING *;
 
 -- name: ClaimJobs :many
+-- Split pending vs expired-running so each branch can use its partial index
+-- (jobs_claimable_pending / jobs_running_lease). A single OR predicate forced a
+-- full queue scan via jobs_status_updated + sort. Take batch_limit from each
+-- stream then merge — correct for top-K of two sorted lists; may briefly lock
+-- up to 2*batch_limit rows within the transaction.
+WITH pending AS (
+    SELECT c.id, c.priority, c.run_at
+    FROM jobs AS c
+    WHERE c.queue = sqlc.arg(queue)
+      AND c.status = 'pending'
+      AND c.run_at <= sqlc.arg(now)::timestamptz
+    ORDER BY c.priority DESC, c.run_at ASC, c.id ASC
+    FOR UPDATE SKIP LOCKED
+    LIMIT sqlc.arg(batch_limit)
+),
+expired AS (
+    SELECT c.id, c.priority, c.run_at
+    FROM jobs AS c
+    WHERE c.queue = sqlc.arg(queue)
+      AND c.status = 'running'
+      AND c.lease_expires_at <= sqlc.arg(now)::timestamptz
+      AND c.attempts < c.max_attempts
+    ORDER BY c.priority DESC, c.run_at ASC, c.id ASC
+    FOR UPDATE SKIP LOCKED
+    LIMIT sqlc.arg(batch_limit)
+),
+picked AS (
+    SELECT id
+    FROM (
+        SELECT id, priority, run_at FROM pending
+        UNION ALL
+        SELECT id, priority, run_at FROM expired
+    ) candidates
+    ORDER BY priority DESC, run_at ASC, id ASC
+    LIMIT sqlc.arg(batch_limit)
+)
 UPDATE jobs AS j
 SET
     status = 'running',
@@ -62,21 +98,7 @@ SET
     lease_expires_at = sqlc.arg(lease_expires_at),
     attempts = attempts + 1,
     updated_at = sqlc.arg(now)::timestamptz
-WHERE j.id IN (
-    SELECT c.id FROM jobs AS c
-    WHERE c.queue = sqlc.arg(queue)
-      AND (
-          (c.status = 'pending' AND c.run_at <= sqlc.arg(now)::timestamptz)
-          OR (
-              c.status = 'running'
-              AND c.lease_expires_at <= sqlc.arg(now)::timestamptz
-              AND c.attempts < c.max_attempts
-          )
-      )
-    ORDER BY c.priority DESC, c.run_at ASC, c.id ASC
-    FOR UPDATE SKIP LOCKED
-    LIMIT sqlc.arg(batch_limit)
-)
+WHERE j.id IN (SELECT id FROM picked)
 RETURNING *;
 
 -- name: ExtendLease :one
