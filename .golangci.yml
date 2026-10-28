@@ -75,6 +75,7 @@ linters:
             - "**/internal/adapter/http/*.go"
             - "**/internal/adapter/http/**/*.go"
             - "!**/internal/adapter/http/oapi/**"
+            - "!**/*_test.go"
           deny:
             - pkg: github.com/MEHRDADsmj/relay/internal/adapter/storage
               desc: http adapter must not import storage adapters
