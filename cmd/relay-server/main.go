@@ -51,6 +51,11 @@ func main() {
 }
 
 func run(args []string) error {
+	if wantsVersion(args) {
+		fmt.Printf("relay-server %s (commit=%s date=%s go=%s)\n",
+			version, commit, date, runtime.Version())
+		return nil
+	}
 	cmd, rest := parseCommand(args)
 	switch cmd {
 	case "serve", "":
@@ -62,8 +67,18 @@ func run(args []string) error {
 	case "apikey":
 		return runAPIKey(rest)
 	default:
-		return fmt.Errorf("unknown command %q (want serve|migrate|healthcheck|apikey)", cmd)
+		return fmt.Errorf("unknown command %q (want serve|migrate|healthcheck|apikey|--version)", cmd)
 	}
+}
+
+func wantsVersion(args []string) bool {
+	for _, a := range args {
+		switch a {
+		case "--version", "-version", "version":
+			return true
+		}
+	}
+	return false
 }
 
 func parseCommand(args []string) (cmd string, rest []string) {

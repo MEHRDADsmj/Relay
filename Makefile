@@ -25,7 +25,7 @@ COMPOSE_GOPROXY ?= https://goproxy.io,direct
 
 .DEFAULT_GOAL := help
 
-.PHONY: help tools generate lint test test-integration test-e2e cover build up down up-redis up-obs open-obs check-alerts deps demo check-generated
+.PHONY: help tools generate lint test test-integration test-e2e cover build release-snapshot up down up-redis up-obs open-obs check-alerts deps demo check-generated
 
 help: ## list targets
 	@echo "Relay Make targets:"
@@ -38,6 +38,7 @@ help: ## list targets
 	@echo "  make test-e2e          - end-to-end tests (-tags=e2e)"
 	@echo "  make cover             - unit coverage report -> coverage.html"
 	@echo "  make build             - build binaries into bin/ (add bin to PATH)"
+	@echo "  make release-snapshot  - goreleaser snapshot (archives + local images; no publish)"
 	@echo "  make up / make down    - full compose stack up/down"
 	@echo "  make up-redis          - compose with RELAY_STORAGE=redis"
 	@echo "  make up-obs            - stack + Prometheus/Grafana/Jaeger (profile observability)"
@@ -94,11 +95,25 @@ cover: ## unit coverage HTML
 	@echo "wrote coverage.html"
 
 build: ## build server, relayctl, and examples into bin/
-	$(GO) build -o bin/relay-server$(EXE) ./cmd/relay-server
-	$(GO) build -ldflags "$(LDFLAGS)" -o bin/relayctl$(EXE) ./cmd/relayctl
+	$(GO) build -trimpath -ldflags "$(LDFLAGS)" -o bin/relay-server$(EXE) ./cmd/relay-server
+	$(GO) build -trimpath -ldflags "$(LDFLAGS)" -o bin/relayctl$(EXE) ./cmd/relayctl
 	$(GO) build -o bin/example-worker$(EXE) ./examples/worker
 	$(GO) build -o bin/example-producer$(EXE) ./examples/producer
 	@echo "built bin/relay-server$(EXE) bin/relayctl$(EXE) (refresh PATH: export PATH=\"$$PWD/bin:$$PATH\")"
+
+release-snapshot: ## goreleaser release --snapshot --clean (no publish)
+	@if ! command -v goreleaser >/dev/null 2>&1; then \
+		echo "goreleaser not found. Install: go install github.com/goreleaser/goreleaser/v2@latest"; \
+		exit 1; \
+	fi
+	@if ! command -v syft >/dev/null 2>&1; then \
+		echo "syft not found (needed for archive SBOMs)."; \
+		echo "Install: https://github.com/anchore/syft#installation"; \
+		echo "  scoop install syft"; \
+		echo "  curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b \$$(go env GOPATH)/bin"; \
+		exit 1; \
+	fi
+	goreleaser release --snapshot --clean
 
 up: ## docker compose up
 	COMPOSE_GOPROXY=$(COMPOSE_GOPROXY) docker compose up -d --build --scale example-worker=2

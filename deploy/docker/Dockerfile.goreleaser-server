@@ -1,0 +1,9 @@
+# GoReleaser dockers_v2 context: prebuilt binaries under $TARGETPLATFORM/.
+# Do not rebuild here — binaries already have -trimpath + version ldflags.
+FROM gcr.io/distroless/static-debian12:nonroot
+ARG TARGETPLATFORM
+COPY --chown=nonroot:nonroot $TARGETPLATFORM/relay-server /app
+USER nonroot:nonroot
+EXPOSE 7420 7421 7429
+ENTRYPOINT ["/app"]
+CMD ["serve"]

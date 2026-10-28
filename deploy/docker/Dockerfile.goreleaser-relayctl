@@ -1,0 +1,6 @@
+# GoReleaser dockers_v2 context: prebuilt binaries under $TARGETPLATFORM/.
+FROM gcr.io/distroless/static-debian12:nonroot
+ARG TARGETPLATFORM
+COPY --chown=nonroot:nonroot $TARGETPLATFORM/relayctl /app
+USER nonroot:nonroot
+ENTRYPOINT ["/app"]
