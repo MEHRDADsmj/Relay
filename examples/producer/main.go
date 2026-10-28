@@ -7,10 +7,15 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 
+	"github.com/MEHRDADsmj/relay/internal/platform/telemetry"
 	"github.com/MEHRDADsmj/relay/pkg/sdk"
 )
 
@@ -37,17 +42,33 @@ func run(logger *slog.Logger) error {
 
 	baseURL := envOr("RELAY_URL", "http://localhost:7420")
 	apiKey := os.Getenv("RELAY_API_KEY")
-	opts := []sdk.ClientOption{}
+
+	ctx := context.Background()
+	telShutdown, err := telemetry.Setup(ctx, telemetry.Config{
+		Endpoint:       telemetry.EndpointFromEnv(),
+		SampleRatio:    envFloat("RELAY_TRACE_SAMPLE_RATIO", 1.0),
+		ServiceName:    "example-producer",
+		ServiceVersion: "dev",
+		Environment:    envOr("RELAY_ENVIRONMENT", "development"),
+	})
+	if err != nil {
+		return fmt.Errorf("telemetry setup: %w", err)
+	}
+	defer func() { _ = telShutdown(context.Background()) }()
+
+	opts := []sdk.ClientOption{
+		sdk.WithTracerProvider(otel.GetTracerProvider()),
+	}
 	if apiKey != "" {
 		opts = append(opts, sdk.WithAPIKey(apiKey))
 	}
 	client := sdk.NewClient(baseURL, opts...)
+	defer func() { _ = client.Close() }()
 
 	interval := time.Duration(float64(time.Second) / *rate)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	ctx := context.Background()
 	logger.Info("enqueueing jobs",
 		"n", *n,
 		"queue", *queue,
@@ -55,11 +76,21 @@ func run(logger *slog.Logger) error {
 		"relay_url", baseURL,
 	)
 
+	tracer := otel.Tracer("example-producer")
+	ctx, root := tracer.Start(ctx, "demo.enqueue_batch")
+	root.SetAttributes(
+		attribute.String("relay.queue", *queue),
+		attribute.Int("demo.job_count", *n),
+	)
+	defer root.End()
+
 	for i := 0; i < *n; i++ {
 		if i > 0 {
 			select {
 			case <-ticker.C:
 			case <-ctx.Done():
+				root.RecordError(ctx.Err())
+				root.SetStatus(codes.Error, ctx.Err().Error())
 				return ctx.Err()
 			}
 		}
@@ -89,6 +120,8 @@ func run(logger *slog.Logger) error {
 			IdempotencyKey: idem,
 		})
 		if err != nil {
+			root.RecordError(err)
+			root.SetStatus(codes.Error, err.Error())
 			return fmt.Errorf("enqueue %s #%d: %w", jobType, i, err)
 		}
 		fmt.Printf("%s %s %s\n", info.ID, info.Type, info.Status)
@@ -103,4 +136,16 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func envFloat(key string, fallback float64) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return fallback
+	}
+	return n
 }

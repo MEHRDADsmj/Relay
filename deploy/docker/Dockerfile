@@ -30,6 +30,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/app /app
 USER nonroot:nonroot
-EXPOSE 7420 7421
+EXPOSE 7420 7421 7429 9464
 ENTRYPOINT ["/app"]
 CMD ["serve"]

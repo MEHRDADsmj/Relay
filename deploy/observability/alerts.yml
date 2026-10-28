@@ -1,0 +1,58 @@
+# Demonstrative Relay alert rules (local observability stack / CI promtool check).
+groups:
+  - name: relay
+    rules:
+      - alert: RelayQueueBacklogGrowing
+        expr: |
+          (
+            sum by (queue) (relay_queue_jobs{status="pending"})
+            -
+            sum by (queue) (relay_queue_jobs{status="pending"} offset 5m)
+          ) > 50
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Queue {{ $labels.queue }} pending backlog grew by >50 over 5m"
+          description: "Pending jobs are accumulating faster than workers drain them."
+
+      - alert: RelayOldestPendingTooOld
+        expr: relay_queue_oldest_pending_age_seconds > 300
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Oldest pending job in {{ $labels.queue }} is older than 5m"
+          description: "Value={{ $value }}s. Check paused queues, workers, or poison jobs."
+
+      - alert: RelayDeadJobsSpike
+        expr: sum by (queue) (increase(relay_jobs_dead_total[5m])) > 10
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Dead-job spike on queue {{ $labels.queue }}"
+          description: ">10 jobs moved to dead in 5m. Inspect handler errors and retries."
+
+      - alert: RelayNoLeader
+        expr: sum(relay_leader) == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No Relay scheduler leader elected"
+          description: "sum(relay_leader)=0 for 1m. Cron schedules will not fire."
+
+      - alert: RelayHighErrorRate
+        expr: |
+          (
+            sum(rate(relay_http_requests_total{code=~"5.."}[5m]))
+            /
+            clamp_min(sum(rate(relay_http_requests_total[5m])), 1e-9)
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP 5xx rate above 5%"
+          description: "Server HTTP error ratio is elevated. Check logs and upstream storage."

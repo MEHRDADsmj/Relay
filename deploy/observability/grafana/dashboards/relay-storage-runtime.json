@@ -1,0 +1,174 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "targets": [
+        {
+          "expr": "relay_storage_pool_acquired",
+          "legendFormat": "acquired {{backend}}",
+          "refId": "A"
+        },
+        {
+          "expr": "relay_storage_pool_idle",
+          "legendFormat": "idle {{backend}}",
+          "refId": "B"
+        },
+        {
+          "expr": "relay_storage_pool_total",
+          "legendFormat": "total {{backend}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Storage pool connections",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "sum by (kind) (rate(relay_maintenance_runs_total[1m]))",
+          "legendFormat": "runs {{kind}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (kind) (rate(relay_maintenance_affected_total[1m]))",
+          "legendFormat": "affected {{kind}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Maintenance throughput",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, kind) (rate(relay_maintenance_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95 {{kind}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Maintenance duration p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "go_goroutines",
+          "legendFormat": "goroutines {{job}} {{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Goroutines",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "id": 5,
+      "targets": [
+        {
+          "expr": "go_memstats_heap_alloc_bytes",
+          "legendFormat": "heap alloc {{job}} {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "go_memstats_heap_inuse_bytes",
+          "legendFormat": "heap inuse {{job}} {{instance}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Go heap",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "id": 6,
+      "targets": [
+        {
+          "expr": "rate(go_gc_duration_seconds_count[1m])",
+          "legendFormat": "GC/s {{job}} {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(process_cpu_seconds_total[1m])",
+          "legendFormat": "CPU {{job}} {{instance}}",
+          "refId": "B"
+        }
+      ],
+      "title": "GC rate / process CPU",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "id": 7,
+      "targets": [
+        {
+          "expr": "relay_worker_jobs_in_flight",
+          "legendFormat": "in flight {{queue}} {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (outcome) (rate(relay_worker_jobs_total[1m]))",
+          "legendFormat": "worker {{outcome}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Worker in-flight / outcomes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "id": 8,
+      "targets": [
+        {
+          "expr": "rate(relay_stats_collect_errors_total[1m])",
+          "legendFormat": "stats errors {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "relay_build_info",
+          "legendFormat": "{{version}} {{storage}} {{commit}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Stats errors / build info",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["relay", "runtime"],
+  "templating": { "list": [] },
+  "time": { "from": "now-15m", "to": "now" },
+  "timezone": "browser",
+  "title": "Relay Storage & Runtime",
+  "uid": "relay-storage-runtime",
+  "version": 1
+}

@@ -1,0 +1,184 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "targets": [
+        {
+          "expr": "sum by (queue, result) (rate(relay_jobs_enqueued_total[1m]))",
+          "legendFormat": "enqueue {{queue}} {{result}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (queue, outcome) (rate(relay_jobs_finished_total{outcome=\"succeeded\"}[1m]))",
+          "legendFormat": "complete {{queue}}",
+          "refId": "B"
+        },
+        {
+          "expr": "sum by (queue, outcome) (rate(relay_jobs_finished_total{outcome=~\"failed|permanent\"}[1m]))",
+          "legendFormat": "fail {{queue}} {{outcome}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Enqueue / complete / fail rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "sum by (queue, status) (relay_queue_jobs{status=~\"pending|running|scheduled|dead\"})",
+          "legendFormat": "{{queue}} {{status}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Queue depth by status",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "relay_queue_oldest_pending_age_seconds",
+          "legendFormat": "{{queue}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Oldest pending age",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "sum by (queue, job_type) (rate(relay_jobs_dead_total[1m]))",
+          "legendFormat": "{{queue}} {{job_type}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Dead job rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "id": 5,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le, queue) (rate(relay_lease_wait_seconds_bucket[5m])))",
+          "legendFormat": "p50 {{queue}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, queue) (rate(relay_lease_wait_seconds_bucket[5m])))",
+          "legendFormat": "p95 {{queue}}",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, queue) (rate(relay_lease_wait_seconds_bucket[5m])))",
+          "legendFormat": "p99 {{queue}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Lease wait latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "id": 6,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, job_type) (rate(relay_job_run_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95 {{job_type}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Job run duration p95 by type",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "max": 1, "min": 0 }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "id": 7,
+      "targets": [
+        {
+          "expr": "relay_leader",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Leader instance",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "id": 8,
+      "targets": [
+        {
+          "expr": "sum by (code) (rate(relay_http_requests_total{code=~\"5..\"}[1m]))",
+          "legendFormat": "HTTP {{code}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (grpc_code) (rate(grpc_server_handled_total{grpc_code!=\"OK\"}[1m]))",
+          "legendFormat": "gRPC {{grpc_code}}",
+          "refId": "B"
+        }
+      ],
+      "title": "HTTP / gRPC error rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "id": 9,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(relay_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "HTTP p95 {{route}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, grpc_method) (rate(grpc_server_handling_seconds_bucket[5m])))",
+          "legendFormat": "gRPC p95 {{grpc_method}}",
+          "refId": "B"
+        }
+      ],
+      "title": "HTTP / gRPC latency p95",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["relay"],
+  "templating": { "list": [] },
+  "time": { "from": "now-15m", "to": "now" },
+  "timezone": "browser",
+  "title": "Relay Overview",
+  "uid": "relay-overview",
+  "version": 1
+}

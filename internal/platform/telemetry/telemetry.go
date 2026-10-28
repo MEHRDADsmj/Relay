@@ -17,12 +17,13 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
-const serviceName = "relay-server"
+const defaultServiceName = "relay-server"
 
 // Config holds tracing setup options. Endpoint empty disables tracing (noop provider).
 type Config struct {
 	Endpoint       string
 	SampleRatio    float64
+	ServiceName    string // default relay-server
 	ServiceVersion string
 	InstanceID     string
 	Environment    string
@@ -62,11 +63,17 @@ func Setup(ctx context.Context, cfg Config) (shutdown func(context.Context) erro
 		return nil, fmt.Errorf("telemetry: otlp exporter: %w", err)
 	}
 
+	svcName := strings.TrimSpace(cfg.ServiceName)
+	if svcName == "" {
+		svcName = defaultServiceName
+	}
+
+	// NewSchemaless avoids Schema URL conflicts with resource.Default()
+	// (SDK default schema vs semconv package SchemaURL).
 	res, err := resource.Merge(
 		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceName(serviceName),
+		resource.NewSchemaless(
+			semconv.ServiceName(svcName),
 			semconv.ServiceVersion(cfg.ServiceVersion),
 			semconv.ServiceInstanceID(cfg.InstanceID),
 			semconv.DeploymentEnvironmentName(cfg.Environment),

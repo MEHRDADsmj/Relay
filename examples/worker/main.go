@@ -8,13 +8,21 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel"
+
+	"github.com/MEHRDADsmj/relay/internal/platform/telemetry"
 	"github.com/MEHRDADsmj/relay/pkg/sdk"
+	"github.com/MEHRDADsmj/relay/pkg/sdk/sdkprom"
 )
 
 type welcomeEmailArgs struct {
@@ -39,17 +47,63 @@ func run(logger *slog.Logger) error {
 	queue := envOr("RELAY_QUEUE", "default")
 	apiKey := os.Getenv("RELAY_API_KEY")
 	concurrency := envInt("WORKER_CONCURRENCY", 10)
+	metricsAddr := envOr("WORKER_METRICS_ADDR", ":9464")
 
-	opts := []sdk.ClientOption{}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	telShutdown, err := telemetry.Setup(ctx, telemetry.Config{
+		Endpoint:       telemetry.EndpointFromEnv(),
+		SampleRatio:    envFloat("RELAY_TRACE_SAMPLE_RATIO", 1.0),
+		ServiceName:    "example-worker",
+		ServiceVersion: "dev",
+		InstanceID:     envOr("RELAY_INSTANCE_ID", hostnamePID()),
+		Environment:    envOr("RELAY_ENVIRONMENT", "development"),
+	})
+	if err != nil {
+		return fmt.Errorf("telemetry setup: %w", err)
+	}
+	defer func() { _ = telShutdown(context.WithoutCancel(ctx)) }()
+
+	reg := prometheus.NewRegistry()
+	reg.MustRegister(
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+	)
+	hooks := sdkprom.NewHooks(reg)
+
+	metricsSrv := &http.Server{
+		Addr:              metricsAddr,
+		Handler:           promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		logger.Info("worker metrics listening", "addr", metricsAddr)
+		if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("metrics server failed", "err", err)
+			stop()
+		}
+	}()
+	defer func() {
+		shCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = metricsSrv.Shutdown(shCtx)
+	}()
+
+	opts := []sdk.ClientOption{
+		sdk.WithTracerProvider(otel.GetTracerProvider()),
+	}
 	if apiKey != "" {
 		opts = append(opts, sdk.WithAPIKey(apiKey))
 	}
 	client := sdk.NewClient(baseURL, opts...)
+	defer func() { _ = client.Close() }()
 
 	w, err := sdk.NewWorker(client, sdk.WorkerOptions{
 		Queue:       queue,
 		Concurrency: concurrency,
 		Logger:      logger,
+		Hooks:       hooks,
 	})
 	if err != nil {
 		return fmt.Errorf("create worker: %w", err)
@@ -85,13 +139,11 @@ func run(logger *slog.Logger) error {
 		return nil
 	})
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	logger.Info("worker starting",
 		"relay_url", baseURL,
 		"queue", queue,
 		"concurrency", concurrency,
+		"metrics_addr", metricsAddr,
 	)
 	return w.Run(ctx)
 }
@@ -144,4 +196,24 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func envFloat(key string, fallback float64) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+func hostnamePID() string {
+	h, err := os.Hostname()
+	if err != nil || h == "" {
+		h = "worker"
+	}
+	return fmt.Sprintf("%s-%d", h, os.Getpid())
 }

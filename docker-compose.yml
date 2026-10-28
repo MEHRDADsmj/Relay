@@ -39,9 +39,11 @@ services:
     ports:
       - "7420:7420"
       - "7421:7421"
+      - "7429:7429"
     environment:
       RELAY_HTTP_ADDR: ":7420"
       RELAY_GRPC_ADDR: ":7421"
+      RELAY_ADMIN_ADDR: ":7429"
       RELAY_GRPC_REFLECTION: "true"
       RELAY_SCHEDULER_ENABLED: "true"
       RELAY_STORAGE: ${RELAY_STORAGE:-postgres}
@@ -54,8 +56,10 @@ services:
       RELAY_LOG_LEVEL: info
       RELAY_LOG_FORMAT: json
       RELAY_API_KEY: ${RELAY_API_KEY:-}
-    deploy:
-      replicas: 2
+      RELAY_ENVIRONMENT: ${RELAY_ENVIRONMENT:-development}
+      RELAY_TRACE_SAMPLE_RATIO: ${RELAY_TRACE_SAMPLE_RATIO:-1.0}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-jaeger:4317}
+      OTEL_EXPORTER_OTLP_INSECURE: ${OTEL_EXPORTER_OTLP_INSECURE:-true}
     depends_on:
       postgres:
         condition: service_healthy
@@ -68,7 +72,7 @@ services:
       retries: 12
       start_period: 15s
 
-  # Non-swarm Compose ignores deploy.replicas; second instance for leader election demo.
+  # Second instance for leader election demo (Compose --scale is unreliable with published ports).
   relay-server-2:
     build:
       context: .
@@ -79,6 +83,7 @@ services:
     environment:
       RELAY_HTTP_ADDR: ":7420"
       RELAY_GRPC_ADDR: ":7421"
+      RELAY_ADMIN_ADDR: ":7429"
       RELAY_GRPC_REFLECTION: "true"
       RELAY_SCHEDULER_ENABLED: "true"
       RELAY_INSTANCE_ID: relay-server-2
@@ -92,6 +97,10 @@ services:
       RELAY_LOG_LEVEL: info
       RELAY_LOG_FORMAT: json
       RELAY_API_KEY: ${RELAY_API_KEY:-}
+      RELAY_ENVIRONMENT: ${RELAY_ENVIRONMENT:-development}
+      RELAY_TRACE_SAMPLE_RATIO: ${RELAY_TRACE_SAMPLE_RATIO:-1.0}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-jaeger:4317}
+      OTEL_EXPORTER_OTLP_INSECURE: ${OTEL_EXPORTER_OTLP_INSECURE:-true}
     depends_on:
       relay-server:
         condition: service_healthy
@@ -140,13 +149,18 @@ services:
       args:
         CMD: example-worker
         GOPROXY: ${COMPOSE_GOPROXY:-https://proxy.golang.org,direct}
-    deploy:
-      replicas: 2
+    # Metrics on :9464 inside the compose network (Prometheus dns_sd). Not published:
+    # --scale example-worker=2 would conflict on a fixed host port.
     environment:
       RELAY_URL: http://relay-server:7420
       RELAY_API_KEY: ${RELAY_API_KEY:-}
       RELAY_QUEUE: ${RELAY_QUEUE:-default}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-10}
+      WORKER_METRICS_ADDR: ":9464"
+      RELAY_ENVIRONMENT: ${RELAY_ENVIRONMENT:-development}
+      RELAY_TRACE_SAMPLE_RATIO: ${RELAY_TRACE_SAMPLE_RATIO:-1.0}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-jaeger:4317}
+      OTEL_EXPORTER_OTLP_INSECURE: ${OTEL_EXPORTER_OTLP_INSECURE:-true}
     depends_on:
       relay-server:
         condition: service_healthy
@@ -164,11 +178,59 @@ services:
       RELAY_URL: http://relay-server:7420
       RELAY_API_KEY: ${RELAY_API_KEY:-}
       RELAY_QUEUE: ${RELAY_QUEUE:-default}
+      RELAY_ENVIRONMENT: ${RELAY_ENVIRONMENT:-development}
+      RELAY_TRACE_SAMPLE_RATIO: ${RELAY_TRACE_SAMPLE_RATIO:-1.0}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-jaeger:4317}
+      OTEL_EXPORTER_OTLP_INSECURE: ${OTEL_EXPORTER_OTLP_INSECURE:-true}
     depends_on:
       relay-server:
         condition: service_healthy
       example-worker:
         condition: service_started
+
+  jaeger:
+    profiles: ["observability"]
+    image: jaegertracing/jaeger:2.7.0
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:v3.2.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-lifecycle
+      - --storage.tsdb.retention.time=6h
+    ports:
+      - "9390:9090"
+    volumes:
+      - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+    depends_on:
+      - relay-server
+      - example-worker
+
+  grafana:
+    profiles: ["observability"]
+    image: grafana/grafana:11.5.2
+    ports:
+      - "3300:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_USERS_DEFAULT_THEME: light
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/relay-overview.json
+    volumes:
+      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+      - jaeger
 
 volumes:
   relay_pgdata:

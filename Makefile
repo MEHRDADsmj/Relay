@@ -25,7 +25,7 @@ COMPOSE_GOPROXY ?= https://goproxy.io,direct
 
 .DEFAULT_GOAL := help
 
-.PHONY: help tools generate lint test test-integration test-e2e cover build up down up-redis deps demo check-generated
+.PHONY: help tools generate lint test test-integration test-e2e cover build up down up-redis up-obs open-obs check-alerts deps demo check-generated
 
 help: ## list targets
 	@echo "Relay Make targets:"
@@ -40,6 +40,9 @@ help: ## list targets
 	@echo "  make build             - build binaries into bin/ (add bin to PATH)"
 	@echo "  make up / make down    - full compose stack up/down"
 	@echo "  make up-redis          - compose with RELAY_STORAGE=redis"
+	@echo "  make up-obs            - stack + Prometheus/Grafana/Jaeger (profile observability)"
+	@echo "  make open-obs          - print Grafana/Prometheus/Jaeger URLs"
+	@echo "  make check-alerts      - promtool check rules (via Docker)"
 	@echo "  make deps              - start postgres + redis only"
 	@echo "  make demo              - up then run producer once"
 	@echo "  make check-generated   - regenerate and fail on dirty git tree"
@@ -106,11 +109,30 @@ down: ## docker compose down
 up-redis: ## compose with redis storage
 	COMPOSE_GOPROXY=$(COMPOSE_GOPROXY) RELAY_STORAGE=redis docker compose up -d --build --scale example-worker=2
 
+up-obs: ## compose stack + observability profile (Prometheus/Grafana/Jaeger)
+	COMPOSE_GOPROXY=$(COMPOSE_GOPROXY) docker compose --profile observability up -d --build --scale example-worker=2
+	@$(MAKE) open-obs
+
+open-obs: ## print local observability URLs
+	@echo "Grafana:    http://localhost:3300"
+	@echo "Prometheus: http://localhost:9390"
+	@echo "Jaeger:     http://localhost:16686"
+	@echo "Server admin:   http://localhost:7429/metrics"
+	@echo "Worker metrics: example-worker:9464/metrics (compose network; scraped by Prometheus)"
+
+check-alerts: ## validate Prometheus alert rules with promtool
+	# MSYS_NO_PATHCONV: Git Bash must not rewrite the container path.
+	MSYS_NO_PATHCONV=1 docker run --rm --entrypoint promtool \
+		-v "$(CURDIR)/deploy/observability:/etc/prometheus:ro" \
+		prom/prometheus:v3.2.1 \
+		check rules /etc/prometheus/alerts.yml
+
 deps: ## start postgres + redis only
 	docker compose up -d postgres redis
 
 demo: up ## run demo producer
-	# --no-deps: avoid compose run resetting example-worker scale to 1
+	# --build: pick up example changes; --no-deps: avoid resetting example-worker scale to 1
+	COMPOSE_GOPROXY=$(COMPOSE_GOPROXY) docker compose --profile demo build example-producer
 	COMPOSE_GOPROXY=$(COMPOSE_GOPROXY) docker compose --profile demo run --rm --no-deps example-producer
 
 check-generated: generate ## fail if generated files drift

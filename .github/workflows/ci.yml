@@ -99,6 +99,18 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  promtool:
+    name: promtool
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Prometheus alert rules
+        run: |
+          docker run --rm --entrypoint promtool \
+            -v "$PWD/deploy/observability:/etc/prometheus:ro" \
+            prom/prometheus:v3.2.1 \
+            check rules /etc/prometheus/alerts.yml
+
   govulncheck:
     name: govulncheck
     runs-on: ubuntu-latest
