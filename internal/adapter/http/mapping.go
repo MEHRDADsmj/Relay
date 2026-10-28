@@ -175,3 +175,138 @@ func failCommand(id domain.JobID, body oapi.FailRequest) app.FailCommand {
 func releaseCommand(id domain.JobID, body oapi.ReleaseRequest) app.ReleaseCommand {
 	return app.ReleaseCommand{JobID: id, WorkerID: body.WorkerId}
 }
+
+func scheduleToAPI(s domain.Schedule) oapi.Schedule {
+	out := oapi.Schedule{
+		Id:          openapi_types.UUID(s.ID),
+		Name:        s.Name,
+		Cron:        s.Cron,
+		Timezone:    s.Timezone,
+		Queue:       s.Queue,
+		Type:        s.JobType,
+		Payload:     json.RawMessage(s.Payload),
+		Priority:    s.Priority,
+		MaxAttempts: s.MaxAttempts,
+		Enabled:     s.Enabled,
+		NextRunAt:   s.NextRunAt.UTC(),
+		CreatedAt:   s.CreatedAt.UTC(),
+		UpdatedAt:   s.UpdatedAt.UTC(),
+	}
+	if s.LastRunAt != nil {
+		t := s.LastRunAt.UTC()
+		out.LastRunAt = &t
+	}
+	if s.LastJobID != nil {
+		id := openapi_types.UUID(*s.LastJobID)
+		out.LastJobId = &id
+	}
+	return out
+}
+
+func schedulesToAPI(items []domain.Schedule) []oapi.Schedule {
+	out := make([]oapi.Schedule, 0, len(items))
+	for _, s := range items {
+		out = append(out, scheduleToAPI(s))
+	}
+	return out
+}
+
+func createScheduleCommand(body oapi.CreateScheduleRequest) app.CreateScheduleCommand {
+	cmd := app.CreateScheduleCommand{
+		Name:        body.Name,
+		Cron:        body.Cron,
+		Queue:       body.Queue,
+		JobType:     body.Type,
+		Priority:    body.Priority,
+		MaxAttempts: body.MaxAttempts,
+		Enabled:     body.Enabled,
+	}
+	if body.Timezone != nil {
+		cmd.Timezone = *body.Timezone
+	}
+	if body.Payload != nil {
+		cmd.Payload = []byte(*body.Payload)
+	}
+	return cmd
+}
+
+func patchScheduleCommand(id domain.ScheduleID, expected time.Time, body oapi.PatchScheduleRequest) app.UpdateScheduleCommand {
+	cmd := app.UpdateScheduleCommand{
+		ID:                id,
+		ExpectedUpdatedAt: expected,
+		Cron:              body.Cron,
+		Timezone:          body.Timezone,
+		Queue:             body.Queue,
+		JobType:           body.Type,
+		Priority:          body.Priority,
+		MaxAttempts:       body.MaxAttempts,
+		Enabled:           body.Enabled,
+	}
+	if body.Payload != nil {
+		cmd.SetPayload = true
+		cmd.Payload = []byte(*body.Payload)
+	}
+	return cmd
+}
+
+func apiKeyToAPI(k domain.APIKey) oapi.APIKey {
+	out := oapi.APIKey{
+		Id:        k.ID,
+		Name:      k.Name,
+		Prefix:    k.Prefix,
+		Scopes:    scopesToAPI(k.Scopes),
+		CreatedAt: k.CreatedAt.UTC(),
+	}
+	if k.LastUsedAt != nil {
+		t := k.LastUsedAt.UTC()
+		out.LastUsedAt = &t
+	}
+	if k.ExpiresAt != nil {
+		t := k.ExpiresAt.UTC()
+		out.ExpiresAt = &t
+	}
+	if k.RevokedAt != nil {
+		t := k.RevokedAt.UTC()
+		out.RevokedAt = &t
+	}
+	return out
+}
+
+func apiKeysToAPI(keys []domain.APIKey) []oapi.APIKey {
+	out := make([]oapi.APIKey, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, apiKeyToAPI(k))
+	}
+	return out
+}
+
+func createdAPIKeyToAPI(c app.CreatedAPIKey) oapi.CreatedAPIKey {
+	return oapi.CreatedAPIKey{
+		Key:    apiKeyToAPI(c.Key),
+		Secret: c.Secret,
+	}
+}
+
+func scopesToAPI(scopes []domain.Scope) []oapi.Scope {
+	out := make([]oapi.Scope, 0, len(scopes))
+	for _, s := range scopes {
+		out = append(out, oapi.Scope(s))
+	}
+	return out
+}
+
+func scopesFromAPI(scopes []oapi.Scope) []domain.Scope {
+	out := make([]domain.Scope, 0, len(scopes))
+	for _, s := range scopes {
+		out = append(out, domain.Scope(s))
+	}
+	return out
+}
+
+func createAPIKeyCommand(body oapi.CreateAPIKeyRequest) app.CreateAPIKeyCommand {
+	return app.CreateAPIKeyCommand{
+		Name:      body.Name,
+		Scopes:    scopesFromAPI(body.Scopes),
+		ExpiresAt: body.ExpiresAt,
+	}
+}

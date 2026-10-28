@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/MEHRDADsmj/relay/internal/app"
+	"github.com/MEHRDADsmj/relay/internal/domain"
 )
 
 type contextKey int
@@ -128,31 +129,63 @@ func isMaxBytesError(err error) bool {
 	return errors.As(err, &mb)
 }
 
-// Auth requires Authorization: Bearer <apiKey> when apiKey is non-empty.
-// /healthz and /readyz are always exempt.
-// Attaches an admin principal so app-layer RequireScope succeeds (bootstrap until AuthService wiring in T5).
-func Auth(apiKey string) func(http.Handler) http.Handler {
+// Auth authenticates requests and attaches a Principal for RequireScope.
+// When authSvc is non-nil it verifies via AuthService (bootstrap RELAY_API_KEY + stored keys).
+// When authSvc is nil it falls back to static comparison against bootstrapKey (Phase 1 behaviour).
+// /healthz and /readyz are always exempt. Auth is fully open only when there is no bootstrap
+// key and no stored keys — then BootstrapAdmin is attached without credentials.
+func Auth(authSvc *app.AuthService, bootstrapKey string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		if apiKey == "" {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				ctx := app.WithPrincipal(r.Context(), app.BootstrapAdmin)
-				next.ServeHTTP(w, r.WithContext(ctx))
-			})
-		}
-		expected := []byte(apiKey)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
 			if path == "/healthz" || path == "/readyz" {
 				next.ServeHTTP(w, r)
 				return
 			}
-			auth := r.Header.Get(headerAuthorization)
-			if !strings.HasPrefix(auth, bearerPrefix) {
-				writeUnauthorized(w)
+
+			authHdr := r.Header.Get(headerAuthorization)
+			hasBearer := strings.HasPrefix(authHdr, bearerPrefix)
+			secret := ""
+			if hasBearer {
+				secret = strings.TrimPrefix(authHdr, bearerPrefix)
+			}
+
+			if authSvc != nil {
+				if !hasBearer {
+					open, err := authSvc.IsOpen(r.Context())
+					if err != nil {
+						writeInternal(w)
+						return
+					}
+					if open {
+						ctx := app.WithPrincipal(r.Context(), app.BootstrapAdmin)
+						next.ServeHTTP(w, r.WithContext(ctx))
+						return
+					}
+					writeUnauthorized(w)
+					return
+				}
+				p, err := authSvc.Authenticate(r.Context(), secret)
+				if err != nil {
+					if errors.Is(err, domain.ErrUnauthenticated) {
+						writeUnauthorized(w)
+						return
+					}
+					writeInternal(w)
+					return
+				}
+				ctx := app.WithPrincipal(r.Context(), p)
+				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
-			got := []byte(strings.TrimPrefix(auth, bearerPrefix))
-			if subtle.ConstantTimeCompare(got, expected) != 1 {
+
+			// Static bootstrap fallback (tests / callers without AuthService).
+			if bootstrapKey == "" {
+				ctx := app.WithPrincipal(r.Context(), app.BootstrapAdmin)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+			if !hasBearer || subtle.ConstantTimeCompare([]byte(secret), []byte(bootstrapKey)) != 1 {
 				writeUnauthorized(w)
 				return
 			}

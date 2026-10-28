@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	adaptercron "github.com/MEHRDADsmj/relay/internal/adapter/cron"
 	adapterhttp "github.com/MEHRDADsmj/relay/internal/adapter/http"
 	"github.com/MEHRDADsmj/relay/internal/adapter/storage/postgres"
 	redisstore "github.com/MEHRDADsmj/relay/internal/adapter/storage/redis"
@@ -68,10 +69,6 @@ func runServe() error {
 	}
 	slog.SetDefault(log)
 
-	if cfg.APIKey == "" {
-		log.Warn("RELAY_API_KEY is empty; HTTP auth is disabled")
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -101,8 +98,15 @@ func runServe() error {
 		notifier,
 	)
 	queues := app.NewQueueService(mustQueueRepo(repo), repo, clock)
-	handler := adapterhttp.NewRouter(svc, queues, adapterhttp.Options{
+	apiKeyRepo := mustAPIKeyRepo(repo)
+	scheduleRepo := mustScheduleRepo(repo)
+	auth := app.NewAuthService(apiKeyRepo, clock, app.AuthServiceConfig{BootstrapKey: cfg.APIKey}, log)
+	warnAuthConfig(ctx, log, cfg.APIKey, apiKeyRepo)
+	schedules := app.NewScheduleService(scheduleRepo, svc, adaptercron.NewParser(), clock, app.UUIDv7Generator{})
+	apiKeys := app.NewAPIKeyService(apiKeyRepo, clock)
+	handler := adapterhttp.NewRouter(svc, queues, schedules, apiKeys, adapterhttp.Options{
 		APIKey: cfg.APIKey,
+		Auth:   auth,
 		Logger: log,
 	})
 
@@ -223,6 +227,38 @@ func mustQueueRepo(repo app.JobRepository) app.QueueRepository {
 		panic(fmt.Sprintf("%T does not implement app.QueueRepository", repo))
 	}
 	return q
+}
+
+func mustScheduleRepo(repo app.JobRepository) app.ScheduleRepository {
+	s, ok := repo.(app.ScheduleRepository)
+	if !ok {
+		panic(fmt.Sprintf("%T does not implement app.ScheduleRepository", repo))
+	}
+	return s
+}
+
+func mustAPIKeyRepo(repo app.JobRepository) app.APIKeyRepository {
+	k, ok := repo.(app.APIKeyRepository)
+	if !ok {
+		panic(fmt.Sprintf("%T does not implement app.APIKeyRepository", repo))
+	}
+	return k
+}
+
+func warnAuthConfig(ctx context.Context, log *slog.Logger, bootstrap string, keys app.APIKeyRepository) {
+	stored, err := keys.ListAPIKeys(ctx)
+	if err != nil {
+		log.Warn("unable to list API keys for auth startup check", "err", err)
+		return
+	}
+	hasKeys := len(stored) > 0
+	if bootstrap == "" && !hasKeys {
+		log.Warn("auth disabled: RELAY_API_KEY is empty and no stored API keys exist")
+		return
+	}
+	if bootstrap != "" && hasKeys {
+		log.Warn("RELAY_API_KEY bootstrap is set alongside stored API keys")
+	}
 }
 
 func mustMaintenanceRepo(repo app.JobRepository) app.MaintenanceRepository {

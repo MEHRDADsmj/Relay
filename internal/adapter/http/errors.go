@@ -15,13 +15,16 @@ const (
 	problemTypeLeaseLost         = "https://relay.dev/problems/lease-lost"
 	problemTypeInvalidTransition = "https://relay.dev/problems/invalid-transition"
 
-	titleBadRequest         = "Bad Request"
-	titleUnauthorized       = "Unauthorized"
-	titleNotFound           = "Not Found"
-	titleConflict           = "Conflict"
-	titlePayloadTooLarge    = "Payload Too Large"
-	titleInternalError      = "Internal Server Error"
-	titleServiceUnavailable = "Service Unavailable"
+	titleBadRequest           = "Bad Request"
+	titleUnauthorized         = "Unauthorized"
+	titleForbidden            = "Forbidden"
+	titleNotFound             = "Not Found"
+	titleConflict             = "Conflict"
+	titlePreconditionFailed   = "Precondition Failed"
+	titlePreconditionRequired = "Precondition Required"
+	titlePayloadTooLarge      = "Payload Too Large"
+	titleInternalError        = "Internal Server Error"
+	titleServiceUnavailable   = "Service Unavailable"
 )
 
 // problem is the RFC 9457 payload written to clients.
@@ -62,6 +65,24 @@ func writeInternal(w http.ResponseWriter) {
 	writeProblem(w, http.StatusInternalServerError, problemTypeBlank, titleInternalError, "an unexpected error occurred", nil)
 }
 
+func preconditionRequiredProblem() oapi.Problem {
+	return oapi.Problem{
+		Type:   problemTypeBlank,
+		Title:  titlePreconditionRequired,
+		Status: http.StatusPreconditionRequired,
+		Detail: ptr("If-Match header is required"),
+	}
+}
+
+func preconditionFailedProblem() oapi.Problem {
+	return oapi.Problem{
+		Type:   problemTypeBlank,
+		Title:  titlePreconditionFailed,
+		Status: http.StatusPreconditionFailed,
+		Detail: ptr("If-Match does not match current updated_at"),
+	}
+}
+
 func mapDomainError(err error) (status int, problemType, title, detail string, fieldErrors []oapi.FieldError) {
 	var ve *domain.ValidationError
 	if errors.As(err, &ve) {
@@ -79,6 +100,10 @@ func mapDomainError(err error) (status int, problemType, title, detail string, f
 	switch {
 	case errors.Is(err, domain.ErrValidation):
 		return http.StatusBadRequest, problemTypeBlank, titleBadRequest, "validation failed", nil
+	case errors.Is(err, domain.ErrUnauthenticated):
+		return http.StatusUnauthorized, problemTypeBlank, titleUnauthorized, "missing or invalid API key", nil
+	case errors.Is(err, domain.ErrForbidden):
+		return http.StatusForbidden, problemTypeBlank, titleForbidden, "insufficient scope", nil
 	case errors.Is(err, domain.ErrNotFound):
 		return http.StatusNotFound, problemTypeBlank, titleNotFound, "resource not found", nil
 	case errors.Is(err, domain.ErrLeaseLost):

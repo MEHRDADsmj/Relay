@@ -4,25 +4,37 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/MEHRDADsmj/relay/internal/adapter/http/oapi"
 	"github.com/MEHRDADsmj/relay/internal/app"
 	"github.com/MEHRDADsmj/relay/internal/domain"
 )
 
-// Handler implements the generated strict OpenAPI server against JobService and QueueService.
+// Handler implements the generated strict OpenAPI server against app services.
 type Handler struct {
-	jobs   *app.JobService
-	queues *app.QueueService
-	log    *slog.Logger
+	jobs      *app.JobService
+	queues    *app.QueueService
+	schedules *app.ScheduleService
+	apiKeys   *app.APIKeyService
+	log       *slog.Logger
 }
 
 // NewHandler returns a strict-server implementation.
-func NewHandler(jobs *app.JobService, queues *app.QueueService, log *slog.Logger) *Handler {
+func NewHandler(
+	jobs *app.JobService,
+	queues *app.QueueService,
+	schedules *app.ScheduleService,
+	apiKeys *app.APIKeyService,
+	log *slog.Logger,
+) *Handler {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Handler{jobs: jobs, queues: queues, log: log}
+	return &Handler{jobs: jobs, queues: queues, schedules: schedules, apiKeys: apiKeys, log: log}
 }
 
 var _ oapi.StrictServerInterface = (*Handler)(nil)
@@ -247,4 +259,155 @@ func (h *Handler) RetryDeadJobs(ctx context.Context, request oapi.RetryDeadJobsR
 		return nil, err
 	}
 	return oapi.RetryDeadJobs200JSONResponse{Retried: retried}, nil
+}
+
+// CreateSchedule creates a cron schedule.
+func (h *Handler) CreateSchedule(ctx context.Context, request oapi.CreateScheduleRequestObject) (oapi.CreateScheduleResponseObject, error) {
+	if request.Body == nil {
+		return nil, &domain.ValidationError{Field: "body", Message: "required"}
+	}
+	sched, err := h.schedules.Create(ctx, createScheduleCommand(*request.Body))
+	if err != nil {
+		return nil, err
+	}
+	return oapi.CreateSchedule201JSONResponse(scheduleToAPI(sched)), nil
+}
+
+// ListSchedules returns a keyset page of schedules.
+func (h *Handler) ListSchedules(ctx context.Context, request oapi.ListSchedulesRequestObject) (oapi.ListSchedulesResponseObject, error) {
+	pageReq := domain.PageRequest{}
+	if request.Params.Limit != nil {
+		pageReq.Limit = *request.Params.Limit
+	}
+	if request.Params.Cursor != nil {
+		pageReq.Cursor = *request.Params.Cursor
+	}
+	page, err := h.schedules.List(ctx, pageReq)
+	if err != nil {
+		return nil, err
+	}
+	items := page.Items
+	if items == nil {
+		items = []domain.Schedule{}
+	}
+	return oapi.ListSchedules200JSONResponse{
+		Schedules:  schedulesToAPI(items),
+		NextCursor: page.NextCursor,
+	}, nil
+}
+
+// GetSchedule returns a schedule by UUID or unique name.
+func (h *Handler) GetSchedule(ctx context.Context, request oapi.GetScheduleRequestObject) (oapi.GetScheduleResponseObject, error) {
+	key := strings.TrimSpace(request.IdOrName)
+	var sched domain.Schedule
+	var err error
+	if id, parseErr := uuid.Parse(key); parseErr == nil {
+		sched, err = h.schedules.Get(ctx, id)
+	} else {
+		sched, err = h.schedules.GetByName(ctx, key)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return oapi.GetSchedule200JSONResponse(scheduleToAPI(sched)), nil
+}
+
+// PatchSchedule applies a partial update with If-Match optimistic concurrency.
+func (h *Handler) PatchSchedule(ctx context.Context, request oapi.PatchScheduleRequestObject) (oapi.PatchScheduleResponseObject, error) {
+	if request.Params.IfMatch == nil || strings.TrimSpace(*request.Params.IfMatch) == "" {
+		return oapi.PatchSchedule428ApplicationProblemPlusJSONResponse{
+			PreconditionRequiredApplicationProblemPlusJSONResponse: oapi.PreconditionRequiredApplicationProblemPlusJSONResponse(preconditionRequiredProblem()),
+		}, nil
+	}
+	expected, err := parseIfMatch(*request.Params.IfMatch)
+	if err != nil {
+		return nil, &domain.ValidationError{Field: "If-Match", Message: "must be RFC3339Nano timestamp"}
+	}
+	if request.Body == nil {
+		return nil, &domain.ValidationError{Field: "body", Message: "required"}
+	}
+	sched, err := h.schedules.Update(ctx, patchScheduleCommand(domain.ScheduleID(request.Id), expected, *request.Body))
+	if err != nil {
+		if errors.Is(err, domain.ErrConflict) {
+			return oapi.PatchSchedule412ApplicationProblemPlusJSONResponse{
+				PreconditionFailedApplicationProblemPlusJSONResponse: oapi.PreconditionFailedApplicationProblemPlusJSONResponse(preconditionFailedProblem()),
+			}, nil
+		}
+		return nil, err
+	}
+	return oapi.PatchSchedule200JSONResponse(scheduleToAPI(sched)), nil
+}
+
+// DeleteSchedule removes a schedule.
+func (h *Handler) DeleteSchedule(ctx context.Context, request oapi.DeleteScheduleRequestObject) (oapi.DeleteScheduleResponseObject, error) {
+	if err := h.schedules.Delete(ctx, domain.ScheduleID(request.Id)); err != nil {
+		return nil, err
+	}
+	return oapi.DeleteSchedule204Response{}, nil
+}
+
+// EnableSchedule enables a schedule.
+func (h *Handler) EnableSchedule(ctx context.Context, request oapi.EnableScheduleRequestObject) (oapi.EnableScheduleResponseObject, error) {
+	sched, err := h.schedules.Enable(ctx, domain.ScheduleID(request.Id))
+	if err != nil {
+		return nil, err
+	}
+	return oapi.EnableSchedule200JSONResponse(scheduleToAPI(sched)), nil
+}
+
+// DisableSchedule disables a schedule.
+func (h *Handler) DisableSchedule(ctx context.Context, request oapi.DisableScheduleRequestObject) (oapi.DisableScheduleResponseObject, error) {
+	sched, err := h.schedules.Disable(ctx, domain.ScheduleID(request.Id))
+	if err != nil {
+		return nil, err
+	}
+	return oapi.DisableSchedule200JSONResponse(scheduleToAPI(sched)), nil
+}
+
+// TriggerSchedule enqueues a job for the schedule immediately.
+func (h *Handler) TriggerSchedule(ctx context.Context, request oapi.TriggerScheduleRequestObject) (oapi.TriggerScheduleResponseObject, error) {
+	job, err := h.schedules.TriggerNow(ctx, domain.ScheduleID(request.Id))
+	if err != nil {
+		return nil, err
+	}
+	return oapi.TriggerSchedule200JSONResponse(jobToAPI(job)), nil
+}
+
+// CreateAPIKey creates a key and returns the secret once.
+func (h *Handler) CreateAPIKey(ctx context.Context, request oapi.CreateAPIKeyRequestObject) (oapi.CreateAPIKeyResponseObject, error) {
+	if request.Body == nil {
+		return nil, &domain.ValidationError{Field: "body", Message: "required"}
+	}
+	created, err := h.apiKeys.Create(ctx, createAPIKeyCommand(*request.Body))
+	if err != nil {
+		return nil, err
+	}
+	return oapi.CreateAPIKey201JSONResponse(createdAPIKeyToAPI(created)), nil
+}
+
+// ListAPIKeys lists keys without secrets.
+func (h *Handler) ListAPIKeys(ctx context.Context, _ oapi.ListAPIKeysRequestObject) (oapi.ListAPIKeysResponseObject, error) {
+	keys, err := h.apiKeys.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if keys == nil {
+		keys = []domain.APIKey{}
+	}
+	return oapi.ListAPIKeys200JSONResponse{Keys: apiKeysToAPI(keys)}, nil
+}
+
+// RevokeAPIKey revokes a key by ID.
+func (h *Handler) RevokeAPIKey(ctx context.Context, request oapi.RevokeAPIKeyRequestObject) (oapi.RevokeAPIKeyResponseObject, error) {
+	key, err := h.apiKeys.Revoke(ctx, request.Id)
+	if err != nil {
+		return nil, err
+	}
+	return oapi.RevokeAPIKey200JSONResponse(apiKeyToAPI(key)), nil
+}
+
+func parseIfMatch(raw string) (time.Time, error) {
+	s := strings.TrimSpace(raw)
+	s = strings.Trim(s, `"`)
+	return time.Parse(time.RFC3339Nano, s)
 }

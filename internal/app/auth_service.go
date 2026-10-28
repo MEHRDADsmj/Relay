@@ -126,6 +126,19 @@ func (s *AuthService) AuthDisabled(hasKeys bool) bool {
 	return s.bootstrapKey == "" && !hasKeys
 }
 
+// IsOpen reports whether requests may proceed without credentials
+// (no bootstrap key and no stored keys).
+func (s *AuthService) IsOpen(ctx context.Context) (bool, error) {
+	if s.bootstrapKey != "" {
+		return false, nil
+	}
+	keys, err := s.repo.ListAPIKeys(ctx)
+	if err != nil {
+		return false, err
+	}
+	return len(keys) == 0, nil
+}
+
 func (s *AuthService) putCache(cacheKey string, p domain.Principal, negative bool, now time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

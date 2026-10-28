@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	adaptercron "github.com/MEHRDADsmj/relay/internal/adapter/cron"
 	relayhttp "github.com/MEHRDADsmj/relay/internal/adapter/http"
 	"github.com/MEHRDADsmj/relay/internal/adapter/storage/memory"
 	"github.com/MEHRDADsmj/relay/internal/app"
@@ -46,6 +47,35 @@ type httpResult struct {
 	Body   []byte
 }
 
+func discardLog() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func phase3Services(repo *memory.Repository, clock fixedClock, jobs *app.JobService) (*app.QueueService, *app.ScheduleService, *app.APIKeyService) {
+	queues := app.NewQueueService(repo, repo, clock)
+	schedules := app.NewScheduleService(repo, jobs, adaptercron.NewParser(), clock, app.UUIDv7Generator{})
+	apiKeys := app.NewAPIKeyService(repo, clock)
+	return queues, schedules, apiKeys
+}
+
+func mountRouter(
+	repo *memory.Repository,
+	clock fixedClock,
+	jobs *app.JobService,
+	queues *app.QueueService,
+	schedules *app.ScheduleService,
+	apiKeys *app.APIKeyService,
+	opts relayhttp.Options,
+) http.Handler {
+	if opts.Logger == nil {
+		opts.Logger = discardLog()
+	}
+	if opts.Auth == nil {
+		opts.Auth = app.NewAuthService(repo, clock, app.AuthServiceConfig{BootstrapKey: opts.APIKey}, discardLog())
+	}
+	return relayhttp.NewRouter(jobs, queues, schedules, apiKeys, opts)
+}
+
 func testRouter(t *testing.T, apiKey string) (http.Handler, *app.JobService) {
 	t.Helper()
 	now := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
@@ -58,14 +88,11 @@ func testRouter(t *testing.T, apiKey string) (http.Handler, *app.JobService) {
 		clock,
 		&seqIDs{ids: []domain.JobID{id1, id2}},
 		app.FixedDelayRetryPolicy{Delay: time.Second},
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		discardLog(),
 		repo, // memory notifier for long-poll
 	)
-	queues := app.NewQueueService(repo, repo, clock)
-	h := relayhttp.NewRouter(svc, queues, relayhttp.Options{
-		APIKey: apiKey,
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-	})
+	queues, schedules, apiKeys := phase3Services(repo, clock, svc)
+	h := mountRouter(repo, clock, svc, queues, schedules, apiKeys, relayhttp.Options{APIKey: apiKey})
 	return h, svc
 }
 
@@ -78,13 +105,11 @@ func testRouterAt(t *testing.T, now time.Time, ids ...domain.JobID) (http.Handle
 		clock,
 		&seqIDs{ids: ids},
 		app.FixedDelayRetryPolicy{Delay: time.Second},
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		discardLog(),
 		repo,
 	)
-	queues := app.NewQueueService(repo, repo, clock)
-	h := relayhttp.NewRouter(svc, queues, relayhttp.Options{
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-	})
+	queues, schedules, apiKeys := phase3Services(repo, clock, svc)
+	h := mountRouter(repo, clock, svc, queues, schedules, apiKeys, relayhttp.Options{})
 	return h, svc, repo
 }
 
@@ -320,9 +345,8 @@ func TestErrors_BodyTooLarge(t *testing.T) {
 	repo := memory.New()
 	clock := fixedClock{t: now}
 	svc := app.NewJobService(repo, clock, &seqIDs{}, app.FixedDelayRetryPolicy{Delay: time.Second}, nil, nil)
-	queues := app.NewQueueService(repo, repo, clock)
-	h := relayhttp.NewRouter(svc, queues, relayhttp.Options{
-		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+	queues, schedules, apiKeys := phase3Services(repo, clock, svc)
+	h := mountRouter(repo, clock, svc, queues, schedules, apiKeys, relayhttp.Options{
 		MaxBodyBytes: 64,
 	})
 	big := strings.Repeat("a", 128)
@@ -406,10 +430,8 @@ func TestReadyz_Unavailable(t *testing.T) {
 		nil,
 		nil,
 	)
-	queues := app.NewQueueService(repo, repo, clock)
-	h := relayhttp.NewRouter(svc, queues, relayhttp.Options{
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-	})
+	queues, schedules, apiKeys := phase3Services(repo, clock, svc)
+	h := mountRouter(repo, clock, svc, queues, schedules, apiKeys, relayhttp.Options{})
 	res := doJSON(t, h, http.MethodGet, "/readyz", nil, nil)
 	require.Equal(t, http.StatusServiceUnavailable, res.Status)
 	require.Equal(t, "application/problem+json", res.Header.Get("Content-Type"))
@@ -425,13 +447,11 @@ func TestErrors_InternalServerError(t *testing.T) {
 		clock,
 		&seqIDs{ids: []domain.JobID{uuid.Must(uuid.Parse("01900000-0000-7000-8000-000000000010"))}},
 		app.FixedDelayRetryPolicy{Delay: time.Second},
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		discardLog(),
 		nil,
 	)
-	queues := app.NewQueueService(mem, mem, clock)
-	h := relayhttp.NewRouter(svc, queues, relayhttp.Options{
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-	})
+	queues, schedules, apiKeys := phase3Services(mem, clock, svc)
+	h := mountRouter(mem, clock, svc, queues, schedules, apiKeys, relayhttp.Options{})
 	res := doJSON(t, h, http.MethodPost, "/v1/jobs", map[string]any{
 		"queue": "default",
 		"type":  "email.send",

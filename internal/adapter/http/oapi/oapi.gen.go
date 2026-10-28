@@ -44,6 +44,32 @@ const (
 	JobStatusSucceeded JobStatus = "succeeded"
 )
 
+// Defines values for Scope.
+const (
+	Admin    Scope = "admin"
+	Producer Scope = "producer"
+	Worker   Scope = "worker"
+)
+
+// APIKey defines model for APIKey.
+type APIKey struct {
+	CreatedAt  time.Time  `json:"created_at"`
+	ExpiresAt  *time.Time `json:"expires_at"`
+	Id         string     `json:"id"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+	Name       string     `json:"name"`
+
+	// Prefix First 8 characters after rly_ (shown in listings)
+	Prefix    string     `json:"prefix"`
+	RevokedAt *time.Time `json:"revoked_at"`
+	Scopes    []Scope    `json:"scopes"`
+}
+
+// APIKeysResponse defines model for APIKeysResponse.
+type APIKeysResponse struct {
+	Keys []APIKey `json:"keys"`
+}
+
 // Attempt defines model for Attempt.
 type Attempt struct {
 	Error      *string            `json:"error,omitempty"`
@@ -66,6 +92,41 @@ type AttemptsResponse struct {
 // CompleteRequest defines model for CompleteRequest.
 type CompleteRequest struct {
 	WorkerId string `json:"worker_id"`
+}
+
+// CreateAPIKeyRequest defines model for CreateAPIKeyRequest.
+type CreateAPIKeyRequest struct {
+	ExpiresAt *time.Time `json:"expires_at"`
+	Name      string     `json:"name"`
+	Scopes    []Scope    `json:"scopes"`
+}
+
+// CreateScheduleRequest defines model for CreateScheduleRequest.
+type CreateScheduleRequest struct {
+	// Cron Standard 5-field cron or descriptor (@hourly, @daily, @every 5m)
+	Cron string `json:"cron"`
+
+	// Enabled Default true
+	Enabled     *bool  `json:"enabled,omitempty"`
+	MaxAttempts *int   `json:"max_attempts,omitempty"`
+	Name        string `json:"name"`
+
+	// Payload Opaque JSON payload (defaults to {})
+	Payload  *jraw.RawMessage `json:"payload,omitempty"`
+	Priority *int             `json:"priority,omitempty"`
+	Queue    string           `json:"queue"`
+
+	// Timezone IANA time zone (default UTC)
+	Timezone *string `json:"timezone,omitempty"`
+	Type     string  `json:"type"`
+}
+
+// CreatedAPIKey defines model for CreatedAPIKey.
+type CreatedAPIKey struct {
+	Key APIKey `json:"key"`
+
+	// Secret Full secret; shown only once at creation
+	Secret string `json:"secret"`
 }
 
 // EnqueueRequest defines model for EnqueueRequest.
@@ -158,6 +219,20 @@ type LeaseResponse struct {
 	Jobs []Job `json:"jobs"`
 }
 
+// PatchScheduleRequest defines model for PatchScheduleRequest.
+type PatchScheduleRequest struct {
+	Cron        *string `json:"cron,omitempty"`
+	Enabled     *bool   `json:"enabled,omitempty"`
+	MaxAttempts *int    `json:"max_attempts,omitempty"`
+
+	// Payload Opaque JSON payload; omit to leave unchanged
+	Payload  *jraw.RawMessage `json:"payload,omitempty"`
+	Priority *int             `json:"priority,omitempty"`
+	Queue    *string          `json:"queue,omitempty"`
+	Timezone *string          `json:"timezone,omitempty"`
+	Type     *string          `json:"type,omitempty"`
+}
+
 // Problem defines model for Problem.
 type Problem struct {
 	Detail   *string       `json:"detail,omitempty"`
@@ -216,17 +291,60 @@ type RetryDeadResponse struct {
 	Retried int `json:"retried"`
 }
 
+// Schedule defines model for Schedule.
+type Schedule struct {
+	CreatedAt   time.Time           `json:"created_at"`
+	Cron        string              `json:"cron"`
+	Enabled     bool                `json:"enabled"`
+	Id          openapi_types.UUID  `json:"id"`
+	LastJobId   *openapi_types.UUID `json:"last_job_id"`
+	LastRunAt   *time.Time          `json:"last_run_at"`
+	MaxAttempts int                 `json:"max_attempts"`
+	Name        string              `json:"name"`
+	NextRunAt   time.Time           `json:"next_run_at"`
+
+	// Payload Opaque JSON payload
+	Payload   jraw.RawMessage `json:"payload"`
+	Priority  int             `json:"priority"`
+	Queue     string          `json:"queue"`
+	Timezone  string          `json:"timezone"`
+	Type      string          `json:"type"`
+	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+// SchedulePage defines model for SchedulePage.
+type SchedulePage struct {
+	// NextCursor Empty string when this is the last page
+	NextCursor string     `json:"next_cursor"`
+	Schedules  []Schedule `json:"schedules"`
+}
+
+// Scope defines model for Scope.
+type Scope string
+
 // JobID defines model for JobID.
 type JobID = openapi_types.UUID
 
 // QueueName defines model for QueueName.
 type QueueName = string
 
+// ScheduleID defines model for ScheduleID.
+type ScheduleID = openapi_types.UUID
+
+// ScheduleIDOrName defines model for ScheduleIDOrName.
+type ScheduleIDOrName = string
+
 // BadRequest defines model for BadRequest.
 type BadRequest = Problem
 
 // Conflict defines model for Conflict.
 type Conflict = Problem
+
+// ConflictGeneric defines model for ConflictGeneric.
+type ConflictGeneric = Problem
+
+// Forbidden defines model for Forbidden.
+type Forbidden = Problem
 
 // InternalError defines model for InternalError.
 type InternalError = Problem
@@ -237,6 +355,12 @@ type NotFound = Problem
 // PayloadTooLarge defines model for PayloadTooLarge.
 type PayloadTooLarge = Problem
 
+// PreconditionFailed defines model for PreconditionFailed.
+type PreconditionFailed = Problem
+
+// PreconditionRequired defines model for PreconditionRequired.
+type PreconditionRequired = Problem
+
 // Unauthorized defines model for Unauthorized.
 type Unauthorized = Problem
 
@@ -246,6 +370,22 @@ type ListQueueJobsParams struct {
 	Limit  *int      `form:"limit,omitempty" json:"limit,omitempty"`
 	Cursor *string   `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
+
+// ListSchedulesParams defines parameters for ListSchedules.
+type ListSchedulesParams struct {
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// PatchScheduleParams defines parameters for PatchSchedule.
+type PatchScheduleParams struct {
+	// IfMatch Expected updated_at as RFC3339Nano. Required for optimistic concurrency.
+	// Missing → 428; stale → 412.
+	IfMatch *string `json:"If-Match,omitempty"`
+}
+
+// CreateAPIKeyJSONRequestBody defines body for CreateAPIKey for application/json ContentType.
+type CreateAPIKeyJSONRequestBody = CreateAPIKeyRequest
 
 // EnqueueJobJSONRequestBody defines body for EnqueueJob for application/json ContentType.
 type EnqueueJobJSONRequestBody = EnqueueRequest
@@ -268,6 +408,12 @@ type RetryDeadJobsJSONRequestBody = RetryDeadRequest
 // LeaseJobsJSONRequestBody defines body for LeaseJobs for application/json ContentType.
 type LeaseJobsJSONRequestBody = LeaseRequest
 
+// CreateScheduleJSONRequestBody defines body for CreateSchedule for application/json ContentType.
+type CreateScheduleJSONRequestBody = CreateScheduleRequest
+
+// PatchScheduleJSONRequestBody defines body for PatchSchedule for application/json ContentType.
+type PatchScheduleJSONRequestBody = PatchScheduleRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Liveness probe
@@ -276,6 +422,15 @@ type ServerInterface interface {
 	// Readiness probe
 	// (GET /readyz)
 	GetReadyz(w http.ResponseWriter, r *http.Request)
+	// List API keys (secrets never included)
+	// (GET /v1/api-keys)
+	ListAPIKeys(w http.ResponseWriter, r *http.Request)
+	// Create an API key (secret returned once)
+	// (POST /v1/api-keys)
+	CreateAPIKey(w http.ResponseWriter, r *http.Request)
+	// Revoke an API key
+	// (DELETE /v1/api-keys/{id})
+	RevokeAPIKey(w http.ResponseWriter, r *http.Request, id string)
 	// Enqueue a job
 	// (POST /v1/jobs)
 	EnqueueJob(w http.ResponseWriter, r *http.Request)
@@ -324,6 +479,30 @@ type ServerInterface interface {
 	// Resume a paused queue
 	// (POST /v1/queues/{queue}/resume)
 	ResumeQueue(w http.ResponseWriter, r *http.Request, queue QueueName)
+	// List schedules (keyset pagination by name)
+	// (GET /v1/schedules)
+	ListSchedules(w http.ResponseWriter, r *http.Request, params ListSchedulesParams)
+	// Create a cron schedule
+	// (POST /v1/schedules)
+	CreateSchedule(w http.ResponseWriter, r *http.Request)
+	// Get a schedule by ID or name
+	// (GET /v1/schedules/{id_or_name})
+	GetSchedule(w http.ResponseWriter, r *http.Request, idOrName ScheduleIDOrName)
+	// Delete a schedule
+	// (DELETE /v1/schedules/{id})
+	DeleteSchedule(w http.ResponseWriter, r *http.Request, id ScheduleID)
+	// Partially update a schedule (requires If-Match)
+	// (PATCH /v1/schedules/{id})
+	PatchSchedule(w http.ResponseWriter, r *http.Request, id ScheduleID, params PatchScheduleParams)
+	// Disable a schedule
+	// (POST /v1/schedules/{id}/disable)
+	DisableSchedule(w http.ResponseWriter, r *http.Request, id ScheduleID)
+	// Enable a schedule
+	// (POST /v1/schedules/{id}/enable)
+	EnableSchedule(w http.ResponseWriter, r *http.Request, id ScheduleID)
+	// Enqueue a job for a schedule immediately
+	// (POST /v1/schedules/{id}/trigger)
+	TriggerSchedule(w http.ResponseWriter, r *http.Request, id ScheduleID)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -339,6 +518,24 @@ func (_ Unimplemented) GetHealthz(w http.ResponseWriter, r *http.Request) {
 // Readiness probe
 // (GET /readyz)
 func (_ Unimplemented) GetReadyz(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List API keys (secrets never included)
+// (GET /v1/api-keys)
+func (_ Unimplemented) ListAPIKeys(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Create an API key (secret returned once)
+// (POST /v1/api-keys)
+func (_ Unimplemented) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Revoke an API key
+// (DELETE /v1/api-keys/{id})
+func (_ Unimplemented) RevokeAPIKey(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -438,6 +635,54 @@ func (_ Unimplemented) ResumeQueue(w http.ResponseWriter, r *http.Request, queue
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// List schedules (keyset pagination by name)
+// (GET /v1/schedules)
+func (_ Unimplemented) ListSchedules(w http.ResponseWriter, r *http.Request, params ListSchedulesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Create a cron schedule
+// (POST /v1/schedules)
+func (_ Unimplemented) CreateSchedule(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get a schedule by ID or name
+// (GET /v1/schedules/{id_or_name})
+func (_ Unimplemented) GetSchedule(w http.ResponseWriter, r *http.Request, idOrName ScheduleIDOrName) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Delete a schedule
+// (DELETE /v1/schedules/{id})
+func (_ Unimplemented) DeleteSchedule(w http.ResponseWriter, r *http.Request, id ScheduleID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Partially update a schedule (requires If-Match)
+// (PATCH /v1/schedules/{id})
+func (_ Unimplemented) PatchSchedule(w http.ResponseWriter, r *http.Request, id ScheduleID, params PatchScheduleParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Disable a schedule
+// (POST /v1/schedules/{id}/disable)
+func (_ Unimplemented) DisableSchedule(w http.ResponseWriter, r *http.Request, id ScheduleID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Enable a schedule
+// (POST /v1/schedules/{id}/enable)
+func (_ Unimplemented) EnableSchedule(w http.ResponseWriter, r *http.Request, id ScheduleID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Enqueue a job for a schedule immediately
+// (POST /v1/schedules/{id}/trigger)
+func (_ Unimplemented) TriggerSchedule(w http.ResponseWriter, r *http.Request, id ScheduleID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ServerInterfaceWrapper converts contexts to parameters.
 type ServerInterfaceWrapper struct {
 	Handler            ServerInterface
@@ -466,6 +711,59 @@ func (siw *ServerInterfaceWrapper) GetReadyz(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetReadyz(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAPIKeys operation middleware
+func (siw *ServerInterfaceWrapper) ListAPIKeys(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAPIKeys(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateAPIKey operation middleware
+func (siw *ServerInterfaceWrapper) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateAPIKey(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeAPIKey operation middleware
+func (siw *ServerInterfaceWrapper) RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeAPIKey(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -887,6 +1185,229 @@ func (siw *ServerInterfaceWrapper) ResumeQueue(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// ListSchedules operation middleware
+func (siw *ServerInterfaceWrapper) ListSchedules(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListSchedulesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "cursor", r.URL.Query(), &params.Cursor)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSchedules(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateSchedule operation middleware
+func (siw *ServerInterfaceWrapper) CreateSchedule(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateSchedule(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSchedule operation middleware
+func (siw *ServerInterfaceWrapper) GetSchedule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id_or_name" -------------
+	var idOrName ScheduleIDOrName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id_or_name", chi.URLParam(r, "id_or_name"), &idOrName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id_or_name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSchedule(w, r, idOrName)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteSchedule operation middleware
+func (siw *ServerInterfaceWrapper) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id ScheduleID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteSchedule(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PatchSchedule operation middleware
+func (siw *ServerInterfaceWrapper) PatchSchedule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id ScheduleID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PatchScheduleParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "If-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
+		var IfMatch string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			return
+		}
+
+		params.IfMatch = &IfMatch
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PatchSchedule(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DisableSchedule operation middleware
+func (siw *ServerInterfaceWrapper) DisableSchedule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id ScheduleID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DisableSchedule(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// EnableSchedule operation middleware
+func (siw *ServerInterfaceWrapper) EnableSchedule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id ScheduleID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.EnableSchedule(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TriggerSchedule operation middleware
+func (siw *ServerInterfaceWrapper) TriggerSchedule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id ScheduleID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TriggerSchedule(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -1007,6 +1528,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/readyz", wrapper.GetReadyz)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/api-keys", wrapper.ListAPIKeys)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/api-keys", wrapper.CreateAPIKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/v1/api-keys/{id}", wrapper.RevokeAPIKey)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/jobs", wrapper.EnqueueJob)
 	})
 	r.Group(func(r chi.Router) {
@@ -1054,6 +1584,30 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/queues/{queue}/resume", wrapper.ResumeQueue)
 	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/schedules", wrapper.ListSchedules)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/schedules", wrapper.CreateSchedule)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/schedules/{id_or_name}", wrapper.GetSchedule)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/v1/schedules/{id}", wrapper.DeleteSchedule)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/v1/schedules/{id}", wrapper.PatchSchedule)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/schedules/{id}/disable", wrapper.DisableSchedule)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/schedules/{id}/enable", wrapper.EnableSchedule)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/schedules/{id}/trigger", wrapper.TriggerSchedule)
+	})
 
 	return r
 }
@@ -1062,11 +1616,19 @@ type BadRequestApplicationProblemPlusJSONResponse Problem
 
 type ConflictApplicationProblemPlusJSONResponse Problem
 
+type ConflictGenericApplicationProblemPlusJSONResponse Problem
+
+type ForbiddenApplicationProblemPlusJSONResponse Problem
+
 type InternalErrorApplicationProblemPlusJSONResponse Problem
 
 type NotFoundApplicationProblemPlusJSONResponse Problem
 
 type PayloadTooLargeApplicationProblemPlusJSONResponse Problem
+
+type PreconditionFailedApplicationProblemPlusJSONResponse Problem
+
+type PreconditionRequiredApplicationProblemPlusJSONResponse Problem
 
 type UnauthorizedApplicationProblemPlusJSONResponse Problem
 
@@ -1107,6 +1669,199 @@ type GetReadyz503ApplicationProblemPlusJSONResponse Problem
 func (response GetReadyz503ApplicationProblemPlusJSONResponse) VisitGetReadyzResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(503)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListAPIKeysRequestObject struct {
+}
+
+type ListAPIKeysResponseObject interface {
+	VisitListAPIKeysResponse(w http.ResponseWriter) error
+}
+
+type ListAPIKeys200JSONResponse APIKeysResponse
+
+func (response ListAPIKeys200JSONResponse) VisitListAPIKeysResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListAPIKeys401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListAPIKeys401ApplicationProblemPlusJSONResponse) VisitListAPIKeysResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListAPIKeys403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response ListAPIKeys403ApplicationProblemPlusJSONResponse) VisitListAPIKeysResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListAPIKeys500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListAPIKeys500ApplicationProblemPlusJSONResponse) VisitListAPIKeysResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateAPIKeyRequestObject struct {
+	Body *CreateAPIKeyJSONRequestBody
+}
+
+type CreateAPIKeyResponseObject interface {
+	VisitCreateAPIKeyResponse(w http.ResponseWriter) error
+}
+
+type CreateAPIKey201JSONResponse CreatedAPIKey
+
+func (response CreateAPIKey201JSONResponse) VisitCreateAPIKeyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateAPIKey400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response CreateAPIKey400ApplicationProblemPlusJSONResponse) VisitCreateAPIKeyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateAPIKey401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response CreateAPIKey401ApplicationProblemPlusJSONResponse) VisitCreateAPIKeyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateAPIKey403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response CreateAPIKey403ApplicationProblemPlusJSONResponse) VisitCreateAPIKeyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateAPIKey413ApplicationProblemPlusJSONResponse struct {
+	PayloadTooLargeApplicationProblemPlusJSONResponse
+}
+
+func (response CreateAPIKey413ApplicationProblemPlusJSONResponse) VisitCreateAPIKeyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(413)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateAPIKey500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response CreateAPIKey500ApplicationProblemPlusJSONResponse) VisitCreateAPIKeyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RevokeAPIKeyRequestObject struct {
+	Id string `json:"id"`
+}
+
+type RevokeAPIKeyResponseObject interface {
+	VisitRevokeAPIKeyResponse(w http.ResponseWriter) error
+}
+
+type RevokeAPIKey200JSONResponse APIKey
+
+func (response RevokeAPIKey200JSONResponse) VisitRevokeAPIKeyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RevokeAPIKey400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeAPIKey400ApplicationProblemPlusJSONResponse) VisitRevokeAPIKeyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RevokeAPIKey401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeAPIKey401ApplicationProblemPlusJSONResponse) VisitRevokeAPIKeyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RevokeAPIKey403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeAPIKey403ApplicationProblemPlusJSONResponse) VisitRevokeAPIKeyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RevokeAPIKey404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeAPIKey404ApplicationProblemPlusJSONResponse) VisitRevokeAPIKeyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RevokeAPIKey500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeAPIKey500ApplicationProblemPlusJSONResponse) VisitRevokeAPIKeyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -2198,6 +2953,572 @@ func (response ResumeQueue500ApplicationProblemPlusJSONResponse) VisitResumeQueu
 	return json.NewEncoder(w).Encode(response)
 }
 
+type ListSchedulesRequestObject struct {
+	Params ListSchedulesParams
+}
+
+type ListSchedulesResponseObject interface {
+	VisitListSchedulesResponse(w http.ResponseWriter) error
+}
+
+type ListSchedules200JSONResponse SchedulePage
+
+func (response ListSchedules200JSONResponse) VisitListSchedulesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListSchedules400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ListSchedules400ApplicationProblemPlusJSONResponse) VisitListSchedulesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListSchedules401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListSchedules401ApplicationProblemPlusJSONResponse) VisitListSchedulesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListSchedules403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response ListSchedules403ApplicationProblemPlusJSONResponse) VisitListSchedulesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListSchedules500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListSchedules500ApplicationProblemPlusJSONResponse) VisitListSchedulesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateScheduleRequestObject struct {
+	Body *CreateScheduleJSONRequestBody
+}
+
+type CreateScheduleResponseObject interface {
+	VisitCreateScheduleResponse(w http.ResponseWriter) error
+}
+
+type CreateSchedule201JSONResponse Schedule
+
+func (response CreateSchedule201JSONResponse) VisitCreateScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateSchedule400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response CreateSchedule400ApplicationProblemPlusJSONResponse) VisitCreateScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateSchedule401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response CreateSchedule401ApplicationProblemPlusJSONResponse) VisitCreateScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateSchedule403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response CreateSchedule403ApplicationProblemPlusJSONResponse) VisitCreateScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateSchedule409ApplicationProblemPlusJSONResponse struct {
+	ConflictGenericApplicationProblemPlusJSONResponse
+}
+
+func (response CreateSchedule409ApplicationProblemPlusJSONResponse) VisitCreateScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateSchedule413ApplicationProblemPlusJSONResponse struct {
+	PayloadTooLargeApplicationProblemPlusJSONResponse
+}
+
+func (response CreateSchedule413ApplicationProblemPlusJSONResponse) VisitCreateScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(413)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateSchedule500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response CreateSchedule500ApplicationProblemPlusJSONResponse) VisitCreateScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetScheduleRequestObject struct {
+	IdOrName ScheduleIDOrName `json:"id_or_name"`
+}
+
+type GetScheduleResponseObject interface {
+	VisitGetScheduleResponse(w http.ResponseWriter) error
+}
+
+type GetSchedule200JSONResponse Schedule
+
+func (response GetSchedule200JSONResponse) VisitGetScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetSchedule400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetSchedule400ApplicationProblemPlusJSONResponse) VisitGetScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetSchedule401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetSchedule401ApplicationProblemPlusJSONResponse) VisitGetScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetSchedule403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response GetSchedule403ApplicationProblemPlusJSONResponse) VisitGetScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetSchedule404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetSchedule404ApplicationProblemPlusJSONResponse) VisitGetScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetSchedule500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response GetSchedule500ApplicationProblemPlusJSONResponse) VisitGetScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteScheduleRequestObject struct {
+	Id ScheduleID `json:"id"`
+}
+
+type DeleteScheduleResponseObject interface {
+	VisitDeleteScheduleResponse(w http.ResponseWriter) error
+}
+
+type DeleteSchedule204Response struct {
+}
+
+func (response DeleteSchedule204Response) VisitDeleteScheduleResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteSchedule401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteSchedule401ApplicationProblemPlusJSONResponse) VisitDeleteScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteSchedule403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteSchedule403ApplicationProblemPlusJSONResponse) VisitDeleteScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteSchedule404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteSchedule404ApplicationProblemPlusJSONResponse) VisitDeleteScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteSchedule500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteSchedule500ApplicationProblemPlusJSONResponse) VisitDeleteScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PatchScheduleRequestObject struct {
+	Id     ScheduleID `json:"id"`
+	Params PatchScheduleParams
+	Body   *PatchScheduleJSONRequestBody
+}
+
+type PatchScheduleResponseObject interface {
+	VisitPatchScheduleResponse(w http.ResponseWriter) error
+}
+
+type PatchSchedule200JSONResponse Schedule
+
+func (response PatchSchedule200JSONResponse) VisitPatchScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PatchSchedule400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response PatchSchedule400ApplicationProblemPlusJSONResponse) VisitPatchScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PatchSchedule401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response PatchSchedule401ApplicationProblemPlusJSONResponse) VisitPatchScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PatchSchedule403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response PatchSchedule403ApplicationProblemPlusJSONResponse) VisitPatchScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PatchSchedule404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response PatchSchedule404ApplicationProblemPlusJSONResponse) VisitPatchScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PatchSchedule412ApplicationProblemPlusJSONResponse struct {
+	PreconditionFailedApplicationProblemPlusJSONResponse
+}
+
+func (response PatchSchedule412ApplicationProblemPlusJSONResponse) VisitPatchScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(412)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PatchSchedule413ApplicationProblemPlusJSONResponse struct {
+	PayloadTooLargeApplicationProblemPlusJSONResponse
+}
+
+func (response PatchSchedule413ApplicationProblemPlusJSONResponse) VisitPatchScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(413)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PatchSchedule428ApplicationProblemPlusJSONResponse struct {
+	PreconditionRequiredApplicationProblemPlusJSONResponse
+}
+
+func (response PatchSchedule428ApplicationProblemPlusJSONResponse) VisitPatchScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(428)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PatchSchedule500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response PatchSchedule500ApplicationProblemPlusJSONResponse) VisitPatchScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DisableScheduleRequestObject struct {
+	Id ScheduleID `json:"id"`
+}
+
+type DisableScheduleResponseObject interface {
+	VisitDisableScheduleResponse(w http.ResponseWriter) error
+}
+
+type DisableSchedule200JSONResponse Schedule
+
+func (response DisableSchedule200JSONResponse) VisitDisableScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DisableSchedule401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response DisableSchedule401ApplicationProblemPlusJSONResponse) VisitDisableScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DisableSchedule403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response DisableSchedule403ApplicationProblemPlusJSONResponse) VisitDisableScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DisableSchedule404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response DisableSchedule404ApplicationProblemPlusJSONResponse) VisitDisableScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DisableSchedule500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response DisableSchedule500ApplicationProblemPlusJSONResponse) VisitDisableScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type EnableScheduleRequestObject struct {
+	Id ScheduleID `json:"id"`
+}
+
+type EnableScheduleResponseObject interface {
+	VisitEnableScheduleResponse(w http.ResponseWriter) error
+}
+
+type EnableSchedule200JSONResponse Schedule
+
+func (response EnableSchedule200JSONResponse) VisitEnableScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type EnableSchedule401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response EnableSchedule401ApplicationProblemPlusJSONResponse) VisitEnableScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type EnableSchedule403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response EnableSchedule403ApplicationProblemPlusJSONResponse) VisitEnableScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type EnableSchedule404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response EnableSchedule404ApplicationProblemPlusJSONResponse) VisitEnableScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type EnableSchedule500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response EnableSchedule500ApplicationProblemPlusJSONResponse) VisitEnableScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TriggerScheduleRequestObject struct {
+	Id ScheduleID `json:"id"`
+}
+
+type TriggerScheduleResponseObject interface {
+	VisitTriggerScheduleResponse(w http.ResponseWriter) error
+}
+
+type TriggerSchedule200JSONResponse Job
+
+func (response TriggerSchedule200JSONResponse) VisitTriggerScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TriggerSchedule401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response TriggerSchedule401ApplicationProblemPlusJSONResponse) VisitTriggerScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TriggerSchedule403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response TriggerSchedule403ApplicationProblemPlusJSONResponse) VisitTriggerScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TriggerSchedule404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response TriggerSchedule404ApplicationProblemPlusJSONResponse) VisitTriggerScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TriggerSchedule500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response TriggerSchedule500ApplicationProblemPlusJSONResponse) VisitTriggerScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// Liveness probe
@@ -2206,6 +3527,15 @@ type StrictServerInterface interface {
 	// Readiness probe
 	// (GET /readyz)
 	GetReadyz(ctx context.Context, request GetReadyzRequestObject) (GetReadyzResponseObject, error)
+	// List API keys (secrets never included)
+	// (GET /v1/api-keys)
+	ListAPIKeys(ctx context.Context, request ListAPIKeysRequestObject) (ListAPIKeysResponseObject, error)
+	// Create an API key (secret returned once)
+	// (POST /v1/api-keys)
+	CreateAPIKey(ctx context.Context, request CreateAPIKeyRequestObject) (CreateAPIKeyResponseObject, error)
+	// Revoke an API key
+	// (DELETE /v1/api-keys/{id})
+	RevokeAPIKey(ctx context.Context, request RevokeAPIKeyRequestObject) (RevokeAPIKeyResponseObject, error)
 	// Enqueue a job
 	// (POST /v1/jobs)
 	EnqueueJob(ctx context.Context, request EnqueueJobRequestObject) (EnqueueJobResponseObject, error)
@@ -2254,6 +3584,30 @@ type StrictServerInterface interface {
 	// Resume a paused queue
 	// (POST /v1/queues/{queue}/resume)
 	ResumeQueue(ctx context.Context, request ResumeQueueRequestObject) (ResumeQueueResponseObject, error)
+	// List schedules (keyset pagination by name)
+	// (GET /v1/schedules)
+	ListSchedules(ctx context.Context, request ListSchedulesRequestObject) (ListSchedulesResponseObject, error)
+	// Create a cron schedule
+	// (POST /v1/schedules)
+	CreateSchedule(ctx context.Context, request CreateScheduleRequestObject) (CreateScheduleResponseObject, error)
+	// Get a schedule by ID or name
+	// (GET /v1/schedules/{id_or_name})
+	GetSchedule(ctx context.Context, request GetScheduleRequestObject) (GetScheduleResponseObject, error)
+	// Delete a schedule
+	// (DELETE /v1/schedules/{id})
+	DeleteSchedule(ctx context.Context, request DeleteScheduleRequestObject) (DeleteScheduleResponseObject, error)
+	// Partially update a schedule (requires If-Match)
+	// (PATCH /v1/schedules/{id})
+	PatchSchedule(ctx context.Context, request PatchScheduleRequestObject) (PatchScheduleResponseObject, error)
+	// Disable a schedule
+	// (POST /v1/schedules/{id}/disable)
+	DisableSchedule(ctx context.Context, request DisableScheduleRequestObject) (DisableScheduleResponseObject, error)
+	// Enable a schedule
+	// (POST /v1/schedules/{id}/enable)
+	EnableSchedule(ctx context.Context, request EnableScheduleRequestObject) (EnableScheduleResponseObject, error)
+	// Enqueue a job for a schedule immediately
+	// (POST /v1/schedules/{id}/trigger)
+	TriggerSchedule(ctx context.Context, request TriggerScheduleRequestObject) (TriggerScheduleResponseObject, error)
 }
 
 type StrictHandlerFunc = strictnethttp.StrictHTTPHandlerFunc
@@ -2326,6 +3680,87 @@ func (sh *strictHandler) GetReadyz(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetReadyzResponseObject); ok {
 		if err := validResponse.VisitGetReadyzResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListAPIKeys operation middleware
+func (sh *strictHandler) ListAPIKeys(w http.ResponseWriter, r *http.Request) {
+	var request ListAPIKeysRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAPIKeys(ctx, request.(ListAPIKeysRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAPIKeys")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAPIKeysResponseObject); ok {
+		if err := validResponse.VisitListAPIKeysResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateAPIKey operation middleware
+func (sh *strictHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
+	var request CreateAPIKeyRequestObject
+
+	var body CreateAPIKeyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateAPIKey(ctx, request.(CreateAPIKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateAPIKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateAPIKeyResponseObject); ok {
+		if err := validResponse.VisitCreateAPIKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeAPIKey operation middleware
+func (sh *strictHandler) RevokeAPIKey(w http.ResponseWriter, r *http.Request, id string) {
+	var request RevokeAPIKeyRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeAPIKey(ctx, request.(RevokeAPIKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeAPIKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeAPIKeyResponseObject); ok {
+		if err := validResponse.VisitRevokeAPIKeyResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -2795,59 +4230,300 @@ func (sh *strictHandler) ResumeQueue(w http.ResponseWriter, r *http.Request, que
 	}
 }
 
+// ListSchedules operation middleware
+func (sh *strictHandler) ListSchedules(w http.ResponseWriter, r *http.Request, params ListSchedulesParams) {
+	var request ListSchedulesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListSchedules(ctx, request.(ListSchedulesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListSchedules")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListSchedulesResponseObject); ok {
+		if err := validResponse.VisitListSchedulesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateSchedule operation middleware
+func (sh *strictHandler) CreateSchedule(w http.ResponseWriter, r *http.Request) {
+	var request CreateScheduleRequestObject
+
+	var body CreateScheduleJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateSchedule(ctx, request.(CreateScheduleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateSchedule")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateScheduleResponseObject); ok {
+		if err := validResponse.VisitCreateScheduleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetSchedule operation middleware
+func (sh *strictHandler) GetSchedule(w http.ResponseWriter, r *http.Request, idOrName ScheduleIDOrName) {
+	var request GetScheduleRequestObject
+
+	request.IdOrName = idOrName
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetSchedule(ctx, request.(GetScheduleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetSchedule")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetScheduleResponseObject); ok {
+		if err := validResponse.VisitGetScheduleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteSchedule operation middleware
+func (sh *strictHandler) DeleteSchedule(w http.ResponseWriter, r *http.Request, id ScheduleID) {
+	var request DeleteScheduleRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteSchedule(ctx, request.(DeleteScheduleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteSchedule")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteScheduleResponseObject); ok {
+		if err := validResponse.VisitDeleteScheduleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PatchSchedule operation middleware
+func (sh *strictHandler) PatchSchedule(w http.ResponseWriter, r *http.Request, id ScheduleID, params PatchScheduleParams) {
+	var request PatchScheduleRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	var body PatchScheduleJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PatchSchedule(ctx, request.(PatchScheduleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PatchSchedule")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PatchScheduleResponseObject); ok {
+		if err := validResponse.VisitPatchScheduleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DisableSchedule operation middleware
+func (sh *strictHandler) DisableSchedule(w http.ResponseWriter, r *http.Request, id ScheduleID) {
+	var request DisableScheduleRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DisableSchedule(ctx, request.(DisableScheduleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DisableSchedule")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DisableScheduleResponseObject); ok {
+		if err := validResponse.VisitDisableScheduleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// EnableSchedule operation middleware
+func (sh *strictHandler) EnableSchedule(w http.ResponseWriter, r *http.Request, id ScheduleID) {
+	var request EnableScheduleRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.EnableSchedule(ctx, request.(EnableScheduleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "EnableSchedule")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(EnableScheduleResponseObject); ok {
+		if err := validResponse.VisitEnableScheduleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// TriggerSchedule operation middleware
+func (sh *strictHandler) TriggerSchedule(w http.ResponseWriter, r *http.Request, id ScheduleID) {
+	var request TriggerScheduleRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.TriggerSchedule(ctx, request.(TriggerScheduleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "TriggerSchedule")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(TriggerScheduleResponseObject); ok {
+		if err := validResponse.VisitTriggerScheduleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
-	"UEgAAA==",
+	"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",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

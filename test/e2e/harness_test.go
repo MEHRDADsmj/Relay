@@ -19,6 +19,7 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 
+	adaptercron "github.com/MEHRDADsmj/relay/internal/adapter/cron"
 	adapterhttp "github.com/MEHRDADsmj/relay/internal/adapter/http"
 	"github.com/MEHRDADsmj/relay/internal/adapter/storage/postgres"
 	redisstore "github.com/MEHRDADsmj/relay/internal/adapter/storage/redis"
@@ -128,8 +129,16 @@ func startStack(t *testing.T, b backend, opts stackOpts) *stack {
 
 	svc := app.NewJobService(b.repo, clock, app.UUIDv7Generator{}, opts.retry, log, notifier)
 	queues := app.NewQueueService(queueRepo, b.repo, clock)
-	handler := adapterhttp.NewRouter(svc, queues, adapterhttp.Options{
+	scheduleRepo, ok := b.repo.(app.ScheduleRepository)
+	require.True(t, ok, "backend must implement ScheduleRepository")
+	apiKeyRepo, ok := b.repo.(app.APIKeyRepository)
+	require.True(t, ok, "backend must implement APIKeyRepository")
+	auth := app.NewAuthService(apiKeyRepo, clock, app.AuthServiceConfig{BootstrapKey: apiKey}, log)
+	schedules := app.NewScheduleService(scheduleRepo, svc, adaptercron.NewParser(), clock, app.UUIDv7Generator{})
+	apiKeys := app.NewAPIKeyService(apiKeyRepo, clock)
+	handler := adapterhttp.NewRouter(svc, queues, schedules, apiKeys, adapterhttp.Options{
 		APIKey: apiKey,
+		Auth:   auth,
 		Logger: log,
 	})
 
