@@ -1,0 +1,167 @@
+# Default values for relay.
+# This chart does NOT bundle Postgres or Redis — use Bitnami charts or managed services.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/mehrdadsmj/relay-server
+  # Defaults to Chart.appVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65532
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+# Must exceed RELAY_SHUTDOWN_TIMEOUT (default 45s) by ≥5s.
+terminationGracePeriodSeconds: 60
+
+service:
+  type: ClusterIP
+  httpPort: 7420
+  grpcPort: 7421
+  annotations: {}
+
+metrics:
+  # Separate ClusterIP Service exposing the admin port (metrics only).
+  service:
+    enabled: true
+    port: 7429
+    annotations: {}
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+    namespace: ""
+
+probes:
+  liveness:
+    path: /healthz
+    port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    path: /readyz
+    port: http
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+  startup:
+    path: /readyz
+    port: http
+    initialDelaySeconds: 0
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 30
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+  # Optional custom metrics (e.g. queue depth) require a metrics adapter;
+  # configure via additionalMetrics once installed.
+  additionalMetrics: []
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+networkPolicy:
+  enabled: false
+  # When enabled, allow ingress from these CIDRs / namespaces on http+grpc.
+  # Metrics port is open to pods matching prometheusSelector labels.
+  ingressCIDRs: []
+  prometheusSelector:
+    app.kubernetes.io/name: prometheus
+
+topologySpreadConstraints:
+  enabled: true
+  maxSkew: 1
+  topologyKey: kubernetes.io/hostname
+  whenUnsatisfiable: ScheduleAnyway
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Migration Job (Postgres only). Helm pre-install/pre-upgrade hook.
+# Server runs with RELAY_MIGRATE_ON_START=false when migrations.enabled.
+migration:
+  enabled: true
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  annotations: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+config:
+  storage: postgres # postgres | redis
+  httpAddr: ":7420"
+  grpcAddr: ":7421"
+  adminAddr: ":7429"
+  migrateOnStart: false
+  shutdownTimeout: 45s
+  logLevel: info
+  logFormat: json
+  environment: production
+  redisKeyPrefix: relay
+  schedulerEnabled: true
+  grpcReflection: false
+  # Extra env vars (name/value). Prefer secrets for credentials.
+  extraEnv: []
+
+# Credentials. Prefer existingSecret in production.
+secret:
+  create: true
+  # If set, skip creating a Secret and mount this one instead.
+  # Expected keys: RELAY_POSTGRES_URL, RELAY_REDIS_URL, RELAY_API_KEY (as applicable).
+  existingSecret: ""
+  postgresUrl: ""
+  redisUrl: ""
+  apiKey: ""

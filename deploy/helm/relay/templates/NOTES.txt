@@ -1,0 +1,21 @@
+Relay {{ .Chart.AppVersion }} has been installed as release "{{ .Release.Name }}".
+
+HTTP:  {{ include "relay.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.httpPort }}
+gRPC:  {{ include "relay.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.grpcPort }}
+{{- if .Values.metrics.service.enabled }}
+Metrics (ClusterIP only): {{ include "relay.fullname" . }}-metrics.{{ .Release.Namespace }}.svc:{{ .Values.metrics.service.port }}/metrics
+{{- end }}
+
+Storage backend: {{ .Values.config.storage }}
+{{- if and .Values.migration.enabled (eq .Values.config.storage "postgres") }}
+Migrations run as a Helm pre-install/pre-upgrade Job; RELAY_MIGRATE_ON_START=false on the server.
+{{- end }}
+
+This chart does not install Postgres or Redis. Point secret.postgresUrl / secret.redisUrl
+(or secret.existingSecret) at your database, or install Bitnami charts alongside.
+
+Port-forward for local smoke:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "relay.fullname" . }} {{ .Values.service.httpPort }}:{{ .Values.service.httpPort }}
+
+Then:
+  relayctl --server http://127.0.0.1:{{ .Values.service.httpPort }} job enqueue --queue default --type demo --payload '{}'

@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "relay.configMapName" . }}
+  labels:
+    {{- include "relay.labels" . | nindent 4 }}
+data:
+  RELAY_STORAGE: {{ .Values.config.storage | quote }}
+  RELAY_HTTP_ADDR: {{ .Values.config.httpAddr | quote }}
+  RELAY_GRPC_ADDR: {{ .Values.config.grpcAddr | quote }}
+  RELAY_ADMIN_ADDR: {{ .Values.config.adminAddr | quote }}
+  RELAY_MIGRATE_ON_START: {{ ternary "false" (.Values.config.migrateOnStart | toString) .Values.migration.enabled | quote }}
+  RELAY_SHUTDOWN_TIMEOUT: {{ .Values.config.shutdownTimeout | quote }}
+  RELAY_LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  RELAY_LOG_FORMAT: {{ .Values.config.logFormat | quote }}
+  RELAY_ENVIRONMENT: {{ .Values.config.environment | quote }}
+  RELAY_REDIS_KEY_PREFIX: {{ .Values.config.redisKeyPrefix | quote }}
+  RELAY_SCHEDULER_ENABLED: {{ .Values.config.schedulerEnabled | toString | quote }}
+  RELAY_GRPC_REFLECTION: {{ .Values.config.grpcReflection | toString | quote }}

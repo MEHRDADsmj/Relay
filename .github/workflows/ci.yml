@@ -111,6 +111,74 @@ jobs:
             prom/prometheus:v3.2.1 \
             check rules /etc/prometheus/alerts.yml
 
+  helm:
+    name: helm
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.17.3
+
+      - name: Install chart-testing
+        uses: helm/chart-testing-action@v2.7.0
+
+      - name: helm lint
+        run: helm lint deploy/helm/relay
+
+      - name: ct lint
+        run: ct lint --config ct.yaml
+
+      - name: Build relay-server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          push: false
+          load: true
+          tags: relay-server:ci
+          build-args: |
+            CMD=relay-server
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build relayctl
+        run: |
+          mkdir -p bin
+          go build -o bin/relayctl ./cmd/relayctl
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.12.0
+        with:
+          cluster_name: relay-helm
+          wait: 120s
+
+      - name: Load image into kind
+        run: kind load docker-image relay-server:ci --name relay-helm
+
+      - name: Install Postgres + Redis deps
+        run: |
+          kubectl apply -f deploy/helm/ci/postgres.yaml
+          kubectl apply -f deploy/helm/ci/redis.yaml
+          kubectl -n relay-deps rollout status deploy/postgres --timeout=180s
+          kubectl -n relay-deps rollout status deploy/redis --timeout=120s
+
+      - name: Kind smoke (postgres)
+        run: bash deploy/helm/ci/smoke.sh postgres
+
+      - name: Kind smoke (redis)
+        run: bash deploy/helm/ci/smoke.sh redis
+
   govulncheck:
     name: govulncheck
     runs-on: ubuntu-latest

@@ -1,0 +1,15 @@
+apiVersion: v2
+name: relay
+description: Relay durable job queue server (HTTP + gRPC)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - jobs
+  - queue
+  - relay
+home: https://github.com/MEHRDADsmj/relay
+sources:
+  - https://github.com/MEHRDADsmj/relay
+maintainers:
+  - name: MEHRDADsmj

@@ -1,0 +1,22 @@
+{{- if .Values.metrics.service.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "relay.fullname" . }}-metrics
+  labels:
+    {{- include "relay.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+  {{- with .Values.metrics.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.service.port }}
+      targetPort: admin
+      protocol: TCP
+  selector:
+    {{- include "relay.selectorLabels" . | nindent 4 }}
+{{- end }}

@@ -1,0 +1,30 @@
+replicaCount: 1
+image:
+  repository: relay-server
+  tag: ci
+  pullPolicy: Never
+migration:
+  enabled: false
+podDisruptionBudget:
+  enabled: false
+autoscaling:
+  enabled: false
+topologySpreadConstraints:
+  enabled: false
+config:
+  storage: redis
+  environment: ci
+  logLevel: info
+  logFormat: json
+  shutdownTimeout: 45s
+secret:
+  create: true
+  redisUrl: redis://redis.relay-deps.svc:6379/0
+  apiKey: smoke-ci-key
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

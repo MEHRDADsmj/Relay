@@ -1,0 +1,10 @@
+# chart-testing configuration — used by CI `helm` job (`ct lint`).
+remote: origin
+target-branch: master
+chart-dirs:
+  - deploy/helm
+charts:
+  - deploy/helm/relay
+helm-extra-args: --timeout 120s
+validate-maintainers: false
+check-version-increment: false

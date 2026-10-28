@@ -1,0 +1,66 @@
+# Minimal Postgres for Helm kind smoke (not for production).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: relay-deps
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-auth
+  namespace: relay-deps
+type: Opaque
+stringData:
+  POSTGRES_USER: relay
+  POSTGRES_PASSWORD: relay
+  POSTGRES_DB: relay
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: relay-deps
+spec:
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: relay-deps
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: postgres-auth
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "relay", "-d", "relay"]
+            initialDelaySeconds: 2
+            periodSeconds: 3
+            timeoutSeconds: 3
+            failureThreshold: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi

@@ -1,0 +1,30 @@
+replicaCount: 1
+image:
+  repository: relay-server
+  tag: ci
+  pullPolicy: Never
+migration:
+  enabled: true
+podDisruptionBudget:
+  enabled: false
+autoscaling:
+  enabled: false
+topologySpreadConstraints:
+  enabled: false
+config:
+  storage: postgres
+  environment: ci
+  logLevel: info
+  logFormat: json
+  shutdownTimeout: 45s
+secret:
+  create: true
+  postgresUrl: postgres://relay:relay@postgres.relay-deps.svc:5432/relay?sslmode=disable
+  apiKey: smoke-ci-key
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
