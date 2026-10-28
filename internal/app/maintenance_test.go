@@ -68,10 +68,11 @@ func TestMaintenance_RunStopsOnCancel(t *testing.T) {
 	assert.GreaterOrEqual(t, repo.purgeCalls, 1)
 }
 
-func TestMaintenance_RetentionZeroSkipsPurge(t *testing.T) {
+func TestMaintenance_ExplicitRetentionZeroSkipsPurge(t *testing.T) {
 	t.Parallel()
 	repo := &fakeMaintRepo{purgeN: 5}
 	clock := &fixedClock{now: time.Now().UTC()}
+	// Non-zero ReapInterval marks an explicit config: Retention 0 = never purge.
 	m := app.NewMaintenance(repo, clock, app.MaintenanceConfig{
 		ReapInterval:  time.Hour,
 		PurgeInterval: 10 * time.Millisecond,

@@ -10,11 +10,14 @@ import (
 
 // MaintenanceConfig tunes the background reaper and retention purger.
 type MaintenanceConfig struct {
-	ReapInterval  time.Duration // default 5s
+	ReapInterval  time.Duration // default 5s; zero (with other zeros) triggers full defaults
 	ReapBatch     int           // default 500
 	PurgeInterval time.Duration // default 1m
 	PurgeBatch    int           // default 1000
-	Retention     time.Duration // default 168h; 0 = never purge
+	// Retention is how long to keep finished jobs. Default 168h when the config is
+	// zero-valued (ReapInterval == 0). Explicit Retention: 0 with a non-zero
+	// ReapInterval means never purge.
+	Retention time.Duration
 }
 
 // Maintenance runs reaping and purge loops until ctx is cancelled.
@@ -26,10 +29,15 @@ type Maintenance struct {
 }
 
 // NewMaintenance constructs a Maintenance runner with defaults applied.
+//
+// When ReapInterval is 0 (zero-value / unset config), all defaults are applied,
+// including Retention = 168h. When the caller sets ReapInterval explicitly,
+// Retention == 0 means never purge.
 func NewMaintenance(repo MaintenanceRepository, clock Clock, cfg MaintenanceConfig, log *slog.Logger) *Maintenance {
 	if log == nil {
 		log = slog.Default()
 	}
+	fullDefaults := cfg.ReapInterval == 0
 	if cfg.ReapInterval <= 0 {
 		cfg.ReapInterval = 5 * time.Second
 	}
@@ -42,7 +50,7 @@ func NewMaintenance(repo MaintenanceRepository, clock Clock, cfg MaintenanceConf
 	if cfg.PurgeBatch <= 0 {
 		cfg.PurgeBatch = 1000
 	}
-	if cfg.Retention < 0 {
+	if fullDefaults && cfg.Retention == 0 {
 		cfg.Retention = 168 * time.Hour
 	}
 	return &Maintenance{repo: repo, clock: clock, cfg: cfg, log: log}
