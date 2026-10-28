@@ -15,6 +15,8 @@ func TestLoad_Defaults(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ":7420", cfg.HTTPAddr)
 	require.Equal(t, ":7421", cfg.GRPCAddr)
+	require.Equal(t, ":7429", cfg.AdminAddr)
+	require.Equal(t, 1000, cfg.MetricsMaxSeries)
 	require.False(t, cfg.GRPCReflection)
 	require.Equal(t, StoragePostgres, cfg.Storage)
 	require.Equal(t, "relay", cfg.RedisKeyPrefix)
@@ -111,6 +113,8 @@ func TestLoad_Overrides(t *testing.T) {
 	t.Setenv("RELAY_LEASE_MAX_WAIT", "15s")
 	t.Setenv("RELAY_SHUTDOWN_TIMEOUT", "30s")
 	t.Setenv("RELAY_GRPC_ADDR", ":9421")
+	t.Setenv("RELAY_ADMIN_ADDR", ":9429")
+	t.Setenv("RELAY_METRICS_MAX_SERIES", "50")
 	t.Setenv("RELAY_GRPC_REFLECTION", "true")
 	t.Setenv("RELAY_SCHEDULER_ENABLED", "false")
 	t.Setenv("RELAY_SCHEDULER_TICK", "2s")
@@ -123,6 +127,8 @@ func TestLoad_Overrides(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ":9000", cfg.HTTPAddr)
 	require.Equal(t, ":9421", cfg.GRPCAddr)
+	require.Equal(t, ":9429", cfg.AdminAddr)
+	require.Equal(t, 50, cfg.MetricsMaxSeries)
 	require.True(t, cfg.GRPCReflection)
 	require.Equal(t, StorageRedis, cfg.Storage)
 	require.Equal(t, "redis://localhost:63799/0", cfg.RedisURL)
@@ -174,6 +180,8 @@ func clearOptional(t *testing.T) {
 	for _, k := range []string{
 		"RELAY_HTTP_ADDR",
 		"RELAY_GRPC_ADDR",
+		"RELAY_ADMIN_ADDR",
+		"RELAY_METRICS_MAX_SERIES",
 		"RELAY_GRPC_REFLECTION",
 		"RELAY_STORAGE",
 		"RELAY_REDIS_URL",

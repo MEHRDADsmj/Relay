@@ -11,22 +11,34 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
+	grpcprom "github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus"
+	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
+	"github.com/MEHRDADsmj/relay/internal/adapter/admin"
 	adaptercron "github.com/MEHRDADsmj/relay/internal/adapter/cron"
 	adaptergrpc "github.com/MEHRDADsmj/relay/internal/adapter/grpc"
 	adapterhttp "github.com/MEHRDADsmj/relay/internal/adapter/http"
+	"github.com/MEHRDADsmj/relay/internal/adapter/metrics/prom"
 	"github.com/MEHRDADsmj/relay/internal/adapter/storage/postgres"
 	redisstore "github.com/MEHRDADsmj/relay/internal/adapter/storage/redis"
 	"github.com/MEHRDADsmj/relay/internal/app"
 	"github.com/MEHRDADsmj/relay/internal/domain"
 	"github.com/MEHRDADsmj/relay/internal/platform/config"
 	"github.com/MEHRDADsmj/relay/internal/platform/logging"
+)
+
+// Set via -ldflags at build time (Phase 4 GoReleaser).
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
 )
 
 func main() {
@@ -91,6 +103,34 @@ func runServe() error {
 	// Apply configured long-poll cap before any LeaseWait calls.
 	domain.MaxLeaseWait = cfg.LeaseMaxWait
 
+	registry := prometheus.NewRegistry()
+	if err := prom.RegisterRuntime(registry); err != nil {
+		return fmt.Errorf("register runtime metrics: %w", err)
+	}
+	if err := prom.RegisterBuildInfo(registry, version, commit, runtime.Version(), cfg.Storage); err != nil {
+		return fmt.Errorf("register build info: %w", err)
+	}
+	bizMetrics, err := prom.New(prom.Options{
+		MaxSeries:  cfg.MetricsMaxSeries,
+		Registerer: registry,
+	})
+	if err != nil {
+		return fmt.Errorf("metrics: %w", err)
+	}
+	httpMetrics, err := prom.NewHTTPMetrics(registry)
+	if err != nil {
+		return fmt.Errorf("http metrics: %w", err)
+	}
+	grpcMetrics := grpcprom.NewServerMetrics(
+		grpcprom.WithServerHandlingTimeHistogram(),
+	)
+	if err := registry.Register(grpcMetrics); err != nil {
+		return fmt.Errorf("grpc metrics: %w", err)
+	}
+	if err := registerStoragePoolMetrics(registry, repo); err != nil {
+		return err
+	}
+
 	clock := app.SystemClock{}
 	notifier := mustNotifier(repo)
 	svc := app.NewJobService(
@@ -100,8 +140,15 @@ func runServe() error {
 		newRetryPolicy(cfg),
 		log,
 		notifier,
-	)
+	).WithMetrics(bizMetrics)
 	queues := app.NewQueueService(mustQueueRepo(repo), repo, clock)
+	queueStats := prom.NewQueueStatsCollector(queues, prom.QueueStatsOptions{})
+	if err := registry.Register(queueStats); err != nil {
+		return fmt.Errorf("queue stats collector: %w", err)
+	}
+	if err := registry.Register(queueStats.CollectErrors); err != nil {
+		return fmt.Errorf("queue stats errors: %w", err)
+	}
 	apiKeyRepo := mustAPIKeyRepo(repo)
 	scheduleRepo := mustScheduleRepo(repo)
 	auth := app.NewAuthService(apiKeyRepo, clock, app.AuthServiceConfig{
@@ -113,9 +160,10 @@ func runServe() error {
 	schedules := app.NewScheduleService(scheduleRepo, svc, cronParser, clock, app.UUIDv7Generator{})
 	apiKeys := app.NewAPIKeyService(apiKeyRepo, clock)
 	handler := adapterhttp.NewRouter(svc, queues, schedules, apiKeys, adapterhttp.Options{
-		APIKey: cfg.APIKey,
-		Auth:   auth,
-		Logger: log,
+		APIKey:  cfg.APIKey,
+		Auth:    auth,
+		Logger:  log,
+		Metrics: httpMetrics.Middleware,
 	})
 
 	maint := app.NewMaintenance(mustMaintenanceRepo(repo), clock, app.MaintenanceConfig{
@@ -124,7 +172,7 @@ func runServe() error {
 		PurgeInterval: cfg.PurgeInterval,
 		PurgeBatch:    cfg.PurgeBatch,
 		Retention:     cfg.Retention,
-	}, log)
+	}, log).WithMetrics(bizMetrics)
 
 	elector, err := newLeaderElector(repo, cfg)
 	if err != nil {
@@ -132,7 +180,7 @@ func runServe() error {
 	}
 	scheduler := app.NewScheduler(scheduleRepo, svc, elector, cronParser, clock, app.SchedulerConfig{
 		Tick: cfg.SchedulerTick,
-	}, log)
+	}, log).WithMetrics(bizMetrics)
 
 	grpcSrv := adaptergrpc.NewServer(adaptergrpc.Services{
 		Jobs:      svc,
@@ -140,15 +188,22 @@ func runServe() error {
 		Schedules: schedules,
 		APIKeys:   apiKeys,
 	}, adaptergrpc.Options{
-		Auth:       auth,
-		Logger:     log,
-		Reflection: cfg.GRPCReflection,
-		Ready:      repo.Ping,
+		Auth:          auth,
+		Logger:        log,
+		Reflection:    cfg.GRPCReflection,
+		Ready:         repo.Ping,
+		ServerMetrics: grpcMetrics,
 	})
 	grpcLis, err := adaptergrpc.Listen(cfg.GRPCAddr)
 	if err != nil {
 		return fmt.Errorf("grpc listen: %w", err)
 	}
+
+	adminSrv := admin.New(admin.Options{
+		Addr:     cfg.AdminAddr,
+		Gatherer: registry,
+		Ready:    repo.Ping,
+	})
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -214,6 +269,14 @@ func runServe() error {
 		return nil
 	})
 	g.Go(func() error {
+		log.Info("admin server listening", "addr", cfg.AdminAddr, "version", version, "commit", commit, "date", date)
+		err := adminSrv.Serve(nil)
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("admin listen: %w", err)
+		}
+		return nil
+	})
+	g.Go(func() error {
 		err := maint.Run(maintCtx)
 		if err == nil || errors.Is(err, context.Canceled) {
 			return nil
@@ -231,13 +294,16 @@ func runServe() error {
 			log.Warn("scheduler did not stop within 5s; continuing shutdown")
 		}
 
-		// 2: stop accepting HTTP/gRPC and drain.
+		// 2: stop accepting HTTP/gRPC/admin and drain.
 		shCtx, cancel := context.WithTimeout(context.WithoutCancel(gctx), cfg.ShutdownTimeout)
 		defer cancel()
-		log.Info("shutting down http and grpc servers", "timeout", cfg.ShutdownTimeout)
+		log.Info("shutting down http, grpc, and admin servers", "timeout", cfg.ShutdownTimeout)
 		var shutdownErr error
 		if err := srv.Shutdown(shCtx); err != nil {
 			shutdownErr = fmt.Errorf("http shutdown: %w", err)
+		}
+		if err := adminSrv.Shutdown(shCtx); err != nil && shutdownErr == nil {
+			shutdownErr = fmt.Errorf("admin shutdown: %w", err)
 		}
 		adaptergrpc.GracefulStop(grpcSrv, cfg.ShutdownTimeout)
 		_ = grpcLis.Close()
@@ -251,6 +317,20 @@ func runServe() error {
 		return err
 	}
 	log.Info("server stopped")
+	return nil
+}
+
+func registerStoragePoolMetrics(reg prometheus.Registerer, repo app.JobRepository) error {
+	switch r := repo.(type) {
+	case *postgres.Repository:
+		if err := reg.Register(prom.NewPostgresPoolCollector(r.Pool())); err != nil {
+			return fmt.Errorf("postgres pool metrics: %w", err)
+		}
+	case *redisstore.Repository:
+		if err := reg.Register(prom.NewRedisPoolCollector(r.Client())); err != nil {
+			return fmt.Errorf("redis pool metrics: %w", err)
+		}
+	}
 	return nil
 }
 

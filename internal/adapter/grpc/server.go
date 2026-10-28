@@ -6,6 +6,7 @@ import (
 	"net"
 	"time"
 
+	grpcprom "github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -29,6 +30,8 @@ type Options struct {
 	// Ready reports storage readiness for the health service. When nil, health
 	// always reports SERVING.
 	Ready func(context.Context) error
+	// ServerMetrics, when set, adds grpc_server_* interceptors (register on Prometheus separately).
+	ServerMetrics *grpcprom.ServerMetrics
 }
 
 // Services holds app-layer dependencies for the gRPC adapter.
@@ -45,9 +48,15 @@ func NewServer(svc Services, opts Options) *grpc.Server {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
+	unary := []grpc.UnaryServerInterceptor{unaryInterceptorChain(opts.Auth, opts.Logger)}
+	stream := []grpc.StreamServerInterceptor{streamInterceptorChain(opts.Auth, opts.Logger)}
+	if opts.ServerMetrics != nil {
+		unary = append([]grpc.UnaryServerInterceptor{opts.ServerMetrics.UnaryServerInterceptor()}, unary...)
+		stream = append([]grpc.StreamServerInterceptor{opts.ServerMetrics.StreamServerInterceptor()}, stream...)
+	}
 	s := grpc.NewServer(
-		grpc.UnaryInterceptor(unaryInterceptorChain(opts.Auth, opts.Logger)),
-		grpc.StreamInterceptor(streamInterceptorChain(opts.Auth, opts.Logger)),
+		grpc.ChainUnaryInterceptor(unary...),
+		grpc.ChainStreamInterceptor(stream...),
 	)
 
 	relayv1.RegisterJobServiceServer(s, &jobServer{jobs: svc.Jobs})
@@ -59,6 +68,9 @@ func NewServer(svc Services, opts Options) *grpc.Server {
 
 	if opts.Reflection {
 		reflection.Register(s)
+	}
+	if opts.ServerMetrics != nil {
+		opts.ServerMetrics.InitializeMetrics(s)
 	}
 	return s
 }

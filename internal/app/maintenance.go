@@ -22,10 +22,11 @@ type MaintenanceConfig struct {
 
 // Maintenance runs reaping and purge loops until ctx is cancelled.
 type Maintenance struct {
-	repo  MaintenanceRepository
-	clock Clock
-	cfg   MaintenanceConfig
-	log   *slog.Logger
+	repo    MaintenanceRepository
+	clock   Clock
+	cfg     MaintenanceConfig
+	log     *slog.Logger
+	metrics Metrics
 }
 
 // NewMaintenance constructs a Maintenance runner with defaults applied.
@@ -53,7 +54,13 @@ func NewMaintenance(repo MaintenanceRepository, clock Clock, cfg MaintenanceConf
 	if fullDefaults && cfg.Retention == 0 {
 		cfg.Retention = 168 * time.Hour
 	}
-	return &Maintenance{repo: repo, clock: clock, cfg: cfg, log: log}
+	return &Maintenance{repo: repo, clock: clock, cfg: cfg, log: log, metrics: NoopMetrics{}}
+}
+
+// WithMetrics sets the metrics sink (nil → NoopMetrics).
+func (m *Maintenance) WithMetrics(metrics Metrics) *Maintenance {
+	m.metrics = metricsOrNoop(metrics)
+	return m
 }
 
 // Run starts reaper and purger loops. It returns only when ctx is done.
@@ -93,43 +100,50 @@ func (m *Maintenance) purgeLoop(ctx context.Context) error {
 }
 
 func (m *Maintenance) reapOnce(ctx context.Context) {
-	for {
-		if ctx.Err() != nil {
-			return
-		}
+	start := time.Now()
+	affected := 0
+	var runErr error
+	for ctx.Err() == nil {
 		res, err := m.repo.ReapExpired(ctx, m.clock.Now(), m.cfg.ReapBatch)
 		if err != nil {
 			m.log.Error("reap expired failed", "err", err)
-			return
+			runErr = err
+			break
 		}
+		n := res.Requeued + res.Dead
+		affected += n
 		if res.Requeued > 0 || res.Dead > 0 {
 			m.log.Info("reaped expired leases", "requeued", res.Requeued, "dead", res.Dead)
 		}
-		if res.Requeued+res.Dead < m.cfg.ReapBatch {
-			return
+		if n < m.cfg.ReapBatch {
+			break
 		}
 	}
+	m.metrics.MaintenanceRun("reap", affected, time.Since(start), runErr)
 }
 
 func (m *Maintenance) purgeOnce(ctx context.Context) {
 	if m.cfg.Retention == 0 {
 		return
 	}
+	start := time.Now()
+	affected := 0
+	var runErr error
 	before := m.clock.Now().Add(-m.cfg.Retention)
-	for {
-		if ctx.Err() != nil {
-			return
-		}
+	for ctx.Err() == nil {
 		n, err := m.repo.PurgeFinished(ctx, before, m.cfg.PurgeBatch)
 		if err != nil {
 			m.log.Error("purge finished failed", "err", err)
-			return
+			runErr = err
+			break
 		}
+		affected += n
 		if n > 0 {
 			m.log.Info("purged finished jobs", "count", n, "before", before)
 		}
 		if n < m.cfg.PurgeBatch {
-			return
+			break
 		}
 	}
+	m.metrics.MaintenanceRun("purge", affected, time.Since(start), runErr)
 }

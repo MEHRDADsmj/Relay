@@ -31,6 +31,7 @@ type Scheduler struct {
 	clock     Clock
 	log       *slog.Logger
 	cfg       SchedulerConfig
+	metrics   Metrics
 }
 
 // NewScheduler constructs a Scheduler. log may be nil.
@@ -60,7 +61,14 @@ func NewScheduler(
 		clock:     clock,
 		log:       log,
 		cfg:       cfg,
+		metrics:   NoopMetrics{},
 	}
+}
+
+// WithMetrics sets the metrics sink (nil → NoopMetrics).
+func (s *Scheduler) WithMetrics(m Metrics) *Scheduler {
+	s.metrics = metricsOrNoop(m)
+	return s
 }
 
 // SystemPrincipal is used by background components (scheduler) when calling scoped services.
@@ -90,8 +98,10 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			}
 		}
 		s.log.InfoContext(ctx, "scheduler leadership acquired")
+		s.metrics.LeaderChanged(schedulerLockName, true)
 		err = s.lead(leaderCtx)
 		resign()
+		s.metrics.LeaderChanged(schedulerLockName, false)
 		s.log.InfoContext(ctx, "scheduler leadership lost")
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -158,14 +168,18 @@ func (s *Scheduler) fireOne(ctx context.Context, sched domain.Schedule, now time
 		IdempotencyKey: key,
 	})
 	if err != nil {
+		s.metrics.SchedulerFired(sched.Name, false)
 		return fmt.Errorf("enqueue: %w", err)
 	}
 	if err := s.schedules.MarkFired(ctx, sched.ID, fire, now, next, job.ID); err != nil {
 		if errors.Is(err, domain.ErrConflict) {
 			s.log.DebugContext(ctx, "mark fired conflict skipped", "schedule_id", sched.ID)
+			s.metrics.SchedulerFired(sched.Name, true)
 			return nil
 		}
+		s.metrics.SchedulerFired(sched.Name, false)
 		return fmt.Errorf("mark fired: %w", err)
 	}
+	s.metrics.SchedulerFired(sched.Name, true)
 	return nil
 }

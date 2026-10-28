@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -17,10 +18,11 @@ type JobService struct {
 	ids      IDGenerator
 	retry    RetryPolicy
 	log      *slog.Logger
+	metrics  Metrics
 }
 
 // NewJobService constructs a JobService. log may be nil (defaults to slog.Default).
-// notifier may be nil (defaults to NopNotifier).
+// notifier may be nil (defaults to NopNotifier). Metrics default to NoopMetrics.
 func NewJobService(repo JobRepository, clock Clock, ids IDGenerator, retry RetryPolicy, log *slog.Logger, notifier JobNotifier) *JobService {
 	if log == nil {
 		log = slog.Default()
@@ -35,7 +37,14 @@ func NewJobService(repo JobRepository, clock Clock, ids IDGenerator, retry Retry
 		ids:      ids,
 		retry:    retry,
 		log:      log,
+		metrics:  NoopMetrics{},
 	}
+}
+
+// WithMetrics sets the metrics sink (nil → NoopMetrics).
+func (s *JobService) WithMetrics(m Metrics) *JobService {
+	s.metrics = metricsOrNoop(m)
+	return s
 }
 
 // Enqueue validates and creates a pending job (idempotent on queue+key).
@@ -60,6 +69,7 @@ func (s *JobService) Enqueue(ctx context.Context, cmd EnqueueCommand) (domain.Jo
 	if err != nil {
 		return domain.Job{}, false, fmt.Errorf("create job: %w", err)
 	}
+	s.metrics.JobEnqueued(stored.Queue, stored.Type, created)
 	return stored, created, nil
 }
 
@@ -105,12 +115,14 @@ func (s *JobService) LeaseWait(ctx context.Context, cmd LeaseCommand) ([]domain.
 		return nil, err
 	}
 
+	waitStarted := time.Now()
 	now := s.clock.Now()
 	jobs, err := s.repo.Claim(ctx, cmd.Queue, cmd.WorkerID, maxJobs, lease, now)
 	if err != nil {
 		return nil, fmt.Errorf("claim jobs: %w", err)
 	}
 	if len(jobs) > 0 || wait == 0 {
+		s.metrics.JobLeased(cmd.Queue, len(jobs), time.Since(waitStarted))
 		return jobs, nil
 	}
 
@@ -123,6 +135,7 @@ func (s *JobService) LeaseWait(ctx context.Context, cmd LeaseCommand) ([]domain.
 		return nil, fmt.Errorf("claim jobs: %w", err)
 	}
 	if len(jobs) > 0 {
+		s.metrics.JobLeased(cmd.Queue, len(jobs), time.Since(waitStarted))
 		return jobs, nil
 	}
 
@@ -134,6 +147,7 @@ func (s *JobService) LeaseWait(ctx context.Context, cmd LeaseCommand) ([]domain.
 	for {
 		remain := time.Until(deadline)
 		if remain <= 0 {
+			s.metrics.JobLeased(cmd.Queue, 0, time.Since(waitStarted))
 			return nil, nil
 		}
 		timer := time.NewTimer(remain)
@@ -146,6 +160,7 @@ func (s *JobService) LeaseWait(ctx context.Context, cmd LeaseCommand) ([]domain.
 		case <-ticker.C:
 			timer.Stop()
 		case <-timer.C:
+			s.metrics.JobLeased(cmd.Queue, 0, time.Since(waitStarted))
 			return nil, nil
 		}
 		now = s.clock.Now()
@@ -154,9 +169,11 @@ func (s *JobService) LeaseWait(ctx context.Context, cmd LeaseCommand) ([]domain.
 			return nil, fmt.Errorf("claim jobs: %w", err)
 		}
 		if len(jobs) > 0 {
+			s.metrics.JobLeased(cmd.Queue, len(jobs), time.Since(waitStarted))
 			return jobs, nil
 		}
 		if !time.Now().Before(deadline) {
+			s.metrics.JobLeased(cmd.Queue, 0, time.Since(waitStarted))
 			return nil, nil
 		}
 	}
@@ -176,6 +193,7 @@ func (s *JobService) Heartbeat(ctx context.Context, cmd HeartbeatCommand) (domai
 	}
 	job, err := s.repo.ExtendLease(ctx, cmd.JobID, cmd.WorkerID, lease, s.clock.Now())
 	if err != nil {
+		s.recordLeaseLost(ctx, cmd.JobID, err)
 		return domain.Job{}, err
 	}
 	return job, nil
@@ -189,10 +207,18 @@ func (s *JobService) Complete(ctx context.Context, cmd CompleteCommand) (domain.
 	if err := domain.ValidateWorkerID(cmd.WorkerID); err != nil {
 		return domain.Job{}, err
 	}
-	job, err := s.repo.Complete(ctx, cmd.JobID, cmd.WorkerID, s.clock.Now())
+	now := s.clock.Now()
+	runDur := s.attemptRunDuration(ctx, cmd.JobID, now)
+	job, err := s.repo.Complete(ctx, cmd.JobID, cmd.WorkerID, now)
 	if err != nil {
+		s.recordLeaseLost(ctx, cmd.JobID, err)
 		return domain.Job{}, err
 	}
+	outcome := domain.AttemptSucceeded
+	if job.Status == domain.StatusCancelled {
+		outcome = domain.AttemptCancelled
+	}
+	s.metrics.JobFinished(job.Queue, job.Type, outcome, runDur)
 	return job, nil
 }
 
@@ -211,14 +237,28 @@ func (s *JobService) Fail(ctx context.Context, cmd FailCommand) (domain.Job, err
 		return domain.Job{}, err
 	}
 	if err := job.EnsureLeasedBy(cmd.WorkerID, now); err != nil {
+		if errors.Is(err, domain.ErrLeaseLost) {
+			s.metrics.LeaseLost(job.Queue)
+		}
 		return domain.Job{}, err
 	}
+	runDur := s.attemptRunDuration(ctx, cmd.JobID, now)
 	decision := job.DecideFailure(now, s.retry.NextDelay(job.Attempts), cmd.Permanent)
 	errMsg := domain.TruncateErrorMessage(cmd.Error)
 	updated, err := s.repo.Fail(ctx, cmd.JobID, cmd.WorkerID, errMsg, decision, now)
 	if err != nil {
+		s.recordLeaseLost(ctx, cmd.JobID, err)
 		return domain.Job{}, err
 	}
+	outcome := domain.AttemptFailed
+	switch updated.Status {
+	case domain.StatusCancelled:
+		outcome = domain.AttemptCancelled
+	case domain.StatusDead:
+		outcome = domain.AttemptFailed
+		s.metrics.JobDead(updated.Queue, updated.Type)
+	}
+	s.metrics.JobFinished(updated.Queue, updated.Type, outcome, runDur)
 	return updated, nil
 }
 
@@ -232,9 +272,41 @@ func (s *JobService) Release(ctx context.Context, cmd ReleaseCommand) (domain.Jo
 	}
 	job, err := s.repo.Release(ctx, cmd.JobID, cmd.WorkerID, s.clock.Now())
 	if err != nil {
+		s.recordLeaseLost(ctx, cmd.JobID, err)
 		return domain.Job{}, err
 	}
 	return job, nil
+}
+
+func (s *JobService) recordLeaseLost(ctx context.Context, id domain.JobID, err error) {
+	if !errors.Is(err, domain.ErrLeaseLost) {
+		return
+	}
+	queue := ""
+	if j, gerr := s.repo.Get(ctx, id); gerr == nil {
+		queue = j.Queue
+	}
+	s.metrics.LeaseLost(queue)
+}
+
+func (s *JobService) attemptRunDuration(ctx context.Context, id domain.JobID, now time.Time) time.Duration {
+	attempts, err := s.repo.ListAttempts(ctx, id)
+	if err != nil {
+		return 0
+	}
+	for i := len(attempts) - 1; i >= 0; i-- {
+		if attempts[i].Outcome == domain.AttemptRunning {
+			if attempts[i].StartedAt.IsZero() {
+				return 0
+			}
+			d := now.Sub(attempts[i].StartedAt)
+			if d < 0 {
+				return 0
+			}
+			return d
+		}
+	}
+	return 0
 }
 
 // Cancel cancels a pending job or requests cancel on a running job.

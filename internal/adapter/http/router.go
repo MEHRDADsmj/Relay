@@ -20,6 +20,8 @@ type Options struct {
 	Logger *slog.Logger
 	// MaxBodyBytes limits request bodies (defaults to 1 MiB).
 	MaxBodyBytes int64
+	// Metrics, when set, wraps the router to record HTTP request metrics.
+	Metrics func(http.Handler) http.Handler
 }
 
 // NewRouter builds the chi router with middleware and OpenAPI routes.
@@ -53,8 +55,12 @@ func NewRouter(
 		RequestErrorHandlerFunc:  requestErrorHandler,
 		ResponseErrorHandlerFunc: responseErrorHandler(log),
 	})
-	return oapi.HandlerWithOptions(strict, oapi.ChiServerOptions{
+	handler := oapi.HandlerWithOptions(strict, oapi.ChiServerOptions{
 		BaseRouter:       r,
 		ErrorHandlerFunc: chiErrorHandler,
 	})
+	if opts.Metrics != nil {
+		return opts.Metrics(handler)
+	}
+	return handler
 }

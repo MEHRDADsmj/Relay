@@ -33,6 +33,8 @@ const (
 type Config struct {
 	HTTPAddr         string
 	GRPCAddr         string
+	AdminAddr        string
+	MetricsMaxSeries int
 	GRPCReflection   bool
 	Storage          string
 	PostgresURL      string
@@ -63,26 +65,28 @@ type Config struct {
 // All validation errors are collected and returned together.
 func Load() (Config, error) {
 	cfg := Config{
-		HTTPAddr:       envOr("RELAY_HTTP_ADDR", ":7420"),
-		GRPCAddr:       envOr("RELAY_GRPC_ADDR", ":7421"),
-		Storage:        strings.ToLower(envOr("RELAY_STORAGE", StoragePostgres)),
-		PostgresURL:    os.Getenv("RELAY_POSTGRES_URL"),
-		RedisURL:       os.Getenv("RELAY_REDIS_URL"),
-		RedisKeyPrefix: envOr("RELAY_REDIS_KEY_PREFIX", "relay"),
-		APIKey:         os.Getenv("RELAY_API_KEY"),
-		AuthCacheTTL:   30 * time.Second,
-		LogLevel:       strings.ToLower(envOr("RELAY_LOG_LEVEL", "info")),
-		LogFormat:      strings.ToLower(envOr("RELAY_LOG_FORMAT", "json")),
-		RetryPolicy:    strings.ToLower(envOr("RELAY_RETRY_POLICY", RetryPolicyExponential)),
-		RetryBase:      time.Second,
-		RetryMax:       time.Hour,
-		RetryDelay:     5 * time.Second, // Phase 1 default; remapped below if unset overrides
-		ReapInterval:   5 * time.Second,
-		ReapBatch:      500,
-		PurgeInterval:  time.Minute,
-		PurgeBatch:     1000,
-		Retention:      168 * time.Hour,
-		LeaseMaxWait:   30 * time.Second,
+		HTTPAddr:         envOr("RELAY_HTTP_ADDR", ":7420"),
+		GRPCAddr:         envOr("RELAY_GRPC_ADDR", ":7421"),
+		AdminAddr:        envOr("RELAY_ADMIN_ADDR", ":7429"),
+		MetricsMaxSeries: 1000,
+		Storage:          strings.ToLower(envOr("RELAY_STORAGE", StoragePostgres)),
+		PostgresURL:      os.Getenv("RELAY_POSTGRES_URL"),
+		RedisURL:         os.Getenv("RELAY_REDIS_URL"),
+		RedisKeyPrefix:   envOr("RELAY_REDIS_KEY_PREFIX", "relay"),
+		APIKey:           os.Getenv("RELAY_API_KEY"),
+		AuthCacheTTL:     30 * time.Second,
+		LogLevel:         strings.ToLower(envOr("RELAY_LOG_LEVEL", "info")),
+		LogFormat:        strings.ToLower(envOr("RELAY_LOG_FORMAT", "json")),
+		RetryPolicy:      strings.ToLower(envOr("RELAY_RETRY_POLICY", RetryPolicyExponential)),
+		RetryBase:        time.Second,
+		RetryMax:         time.Hour,
+		RetryDelay:       5 * time.Second, // Phase 1 default; remapped below if unset overrides
+		ReapInterval:     5 * time.Second,
+		ReapBatch:        500,
+		PurgeInterval:    time.Minute,
+		PurgeBatch:       1000,
+		Retention:        168 * time.Hour,
+		LeaseMaxWait:     30 * time.Second,
 		// ShutdownTimeout default = LeaseMaxWait + 15s margin (BaseContext still cancels long-polls on SIGTERM).
 		ShutdownTimeout:  45 * time.Second,
 		SchedulerEnabled: true,
@@ -125,6 +129,15 @@ func Load() (Config, error) {
 			errs = append(errs, fmt.Sprintf("RELAY_AUTH_CACHE_TTL: %v", err))
 		} else {
 			cfg.AuthCacheTTL = d
+		}
+	}
+
+	if v := os.Getenv("RELAY_METRICS_MAX_SERIES"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("RELAY_METRICS_MAX_SERIES: %v", err))
+		} else {
+			cfg.MetricsMaxSeries = n
 		}
 	}
 
@@ -300,6 +313,12 @@ func Load() (Config, error) {
 	}
 	if cfg.GRPCAddr == "" {
 		errs = append(errs, "RELAY_GRPC_ADDR: must not be empty")
+	}
+	if cfg.AdminAddr == "" {
+		errs = append(errs, "RELAY_ADMIN_ADDR: must not be empty")
+	}
+	if cfg.MetricsMaxSeries <= 0 {
+		errs = append(errs, "RELAY_METRICS_MAX_SERIES: must be greater than 0")
 	}
 	if cfg.InstanceID == "" {
 		errs = append(errs, "RELAY_INSTANCE_ID: must not be empty")
