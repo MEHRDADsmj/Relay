@@ -40,6 +40,9 @@ func NewJobService(repo JobRepository, clock Clock, ids IDGenerator, retry Retry
 
 // Enqueue validates and creates a pending job (idempotent on queue+key).
 func (s *JobService) Enqueue(ctx context.Context, cmd EnqueueCommand) (domain.Job, bool, error) {
+	if err := RequireScope(ctx, domain.ScopeProducer); err != nil {
+		return domain.Job{}, false, err
+	}
 	now := s.clock.Now()
 	job, err := domain.NewJob(domain.NewJobParams{
 		Queue:          cmd.Queue,
@@ -62,6 +65,9 @@ func (s *JobService) Enqueue(ctx context.Context, cmd EnqueueCommand) (domain.Jo
 
 // Get returns a job by ID.
 func (s *JobService) Get(ctx context.Context, id domain.JobID) (domain.Job, error) {
+	if err := RequireScope(ctx, domain.ScopeProducer); err != nil {
+		return domain.Job{}, err
+	}
 	job, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return domain.Job{}, err
@@ -77,6 +83,9 @@ func (s *JobService) Lease(ctx context.Context, cmd LeaseCommand) ([]domain.Job,
 
 // LeaseWait claims jobs, optionally waiting up to Wait for a push wakeup or ticker.
 func (s *JobService) LeaseWait(ctx context.Context, cmd LeaseCommand) ([]domain.Job, error) {
+	if err := RequireScope(ctx, domain.ScopeWorker); err != nil {
+		return nil, err
+	}
 	if err := domain.ValidateQueue(cmd.Queue); err != nil {
 		return nil, err
 	}
@@ -155,6 +164,9 @@ func (s *JobService) LeaseWait(ctx context.Context, cmd LeaseCommand) ([]domain.
 
 // Heartbeat extends a job lease owned by the worker.
 func (s *JobService) Heartbeat(ctx context.Context, cmd HeartbeatCommand) (domain.Job, error) {
+	if err := RequireScope(ctx, domain.ScopeWorker); err != nil {
+		return domain.Job{}, err
+	}
 	if err := domain.ValidateWorkerID(cmd.WorkerID); err != nil {
 		return domain.Job{}, err
 	}
@@ -171,6 +183,9 @@ func (s *JobService) Heartbeat(ctx context.Context, cmd HeartbeatCommand) (domai
 
 // Complete marks a leased job as succeeded (or cancelled if requested).
 func (s *JobService) Complete(ctx context.Context, cmd CompleteCommand) (domain.Job, error) {
+	if err := RequireScope(ctx, domain.ScopeWorker); err != nil {
+		return domain.Job{}, err
+	}
 	if err := domain.ValidateWorkerID(cmd.WorkerID); err != nil {
 		return domain.Job{}, err
 	}
@@ -184,6 +199,9 @@ func (s *JobService) Complete(ctx context.Context, cmd CompleteCommand) (domain.
 // Fail records a failure and either schedules a retry or marks the job dead.
 // Permanent forces a dead decision. CancelRequested jobs become cancelled in the repo.
 func (s *JobService) Fail(ctx context.Context, cmd FailCommand) (domain.Job, error) {
+	if err := RequireScope(ctx, domain.ScopeWorker); err != nil {
+		return domain.Job{}, err
+	}
 	if err := domain.ValidateWorkerID(cmd.WorkerID); err != nil {
 		return domain.Job{}, err
 	}
@@ -206,6 +224,9 @@ func (s *JobService) Fail(ctx context.Context, cmd FailCommand) (domain.Job, err
 
 // Release voluntarily returns a leased job to pending without consuming the attempt.
 func (s *JobService) Release(ctx context.Context, cmd ReleaseCommand) (domain.Job, error) {
+	if err := RequireScope(ctx, domain.ScopeWorker); err != nil {
+		return domain.Job{}, err
+	}
 	if err := domain.ValidateWorkerID(cmd.WorkerID); err != nil {
 		return domain.Job{}, err
 	}
@@ -218,6 +239,9 @@ func (s *JobService) Release(ctx context.Context, cmd ReleaseCommand) (domain.Jo
 
 // Cancel cancels a pending job or requests cancel on a running job.
 func (s *JobService) Cancel(ctx context.Context, id domain.JobID) (domain.Job, error) {
+	if err := RequireScope(ctx, domain.ScopeProducer); err != nil {
+		return domain.Job{}, err
+	}
 	job, err := s.repo.Cancel(ctx, id, s.clock.Now())
 	if err != nil {
 		return domain.Job{}, err
@@ -227,6 +251,9 @@ func (s *JobService) Cancel(ctx context.Context, id domain.JobID) (domain.Job, e
 
 // Retry requeues a dead or cancelled job.
 func (s *JobService) Retry(ctx context.Context, id domain.JobID) (domain.Job, error) {
+	if err := RequireScope(ctx, domain.ScopeProducer); err != nil {
+		return domain.Job{}, err
+	}
 	job, err := s.repo.Retry(ctx, id, s.clock.Now())
 	if err != nil {
 		return domain.Job{}, err
@@ -236,11 +263,17 @@ func (s *JobService) Retry(ctx context.Context, id domain.JobID) (domain.Job, er
 
 // ListAttempts returns attempt history for a job.
 func (s *JobService) ListAttempts(ctx context.Context, id domain.JobID) ([]domain.Attempt, error) {
+	if err := RequireScope(ctx, domain.ScopeProducer); err != nil {
+		return nil, err
+	}
 	return s.repo.ListAttempts(ctx, id)
 }
 
 // ListByStatus returns a page of jobs filtered by queue and status.
 func (s *JobService) ListByStatus(ctx context.Context, cmd ListByStatusCommand) (domain.Page[domain.Job], error) {
+	if err := RequireScope(ctx, domain.ScopeProducer); err != nil {
+		return domain.Page[domain.Job]{}, err
+	}
 	if err := domain.ValidateQueue(cmd.Queue); err != nil {
 		return domain.Page[domain.Job]{}, err
 	}

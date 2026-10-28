@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/MEHRDADsmj/relay/internal/app"
 )
 
 type contextKey int
@@ -128,10 +130,14 @@ func isMaxBytesError(err error) bool {
 
 // Auth requires Authorization: Bearer <apiKey> when apiKey is non-empty.
 // /healthz and /readyz are always exempt.
+// Attaches an admin principal so app-layer RequireScope succeeds (bootstrap until AuthService wiring in T5).
 func Auth(apiKey string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		if apiKey == "" {
-			return next
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				ctx := app.WithPrincipal(r.Context(), app.BootstrapAdmin)
+				next.ServeHTTP(w, r.WithContext(ctx))
+			})
 		}
 		expected := []byte(apiKey)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -150,7 +156,8 @@ func Auth(apiKey string) func(http.Handler) http.Handler {
 				writeUnauthorized(w)
 				return
 			}
-			next.ServeHTTP(w, r)
+			ctx := app.WithPrincipal(r.Context(), app.BootstrapAdmin)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }

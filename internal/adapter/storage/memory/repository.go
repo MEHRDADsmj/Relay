@@ -12,22 +12,30 @@ import (
 
 // Repository is an in-memory storage backend implementing all app ports.
 type Repository struct {
-	mu       sync.Mutex
-	jobs     map[domain.JobID]domain.Job
-	byKey    map[string]domain.JobID // queue\0key → id when key non-empty
-	queues   map[string]domain.Queue
-	attempts map[domain.JobID][]domain.Attempt
-	subs     map[string]map[chan struct{}]struct{} // queue → subscribers
+	mu        sync.Mutex
+	jobs      map[domain.JobID]domain.Job
+	byKey     map[string]domain.JobID // queue\0key → id when key non-empty
+	queues    map[string]domain.Queue
+	attempts  map[domain.JobID][]domain.Attempt
+	subs      map[string]map[chan struct{}]struct{} // queue → subscribers
+	schedules map[domain.ScheduleID]domain.Schedule
+	schedName map[string]domain.ScheduleID // name → id
+	apiKeys   map[string]domain.APIKey     // id → key
+	apiPrefix map[string]string            // prefix → id
 }
 
 // New returns an empty in-memory repository.
 func New() *Repository {
 	return &Repository{
-		jobs:     make(map[domain.JobID]domain.Job),
-		byKey:    make(map[string]domain.JobID),
-		queues:   make(map[string]domain.Queue),
-		attempts: make(map[domain.JobID][]domain.Attempt),
-		subs:     make(map[string]map[chan struct{}]struct{}),
+		jobs:      make(map[domain.JobID]domain.Job),
+		byKey:     make(map[string]domain.JobID),
+		queues:    make(map[string]domain.Queue),
+		attempts:  make(map[domain.JobID][]domain.Attempt),
+		subs:      make(map[string]map[chan struct{}]struct{}),
+		schedules: make(map[domain.ScheduleID]domain.Schedule),
+		schedName: make(map[string]domain.ScheduleID),
+		apiKeys:   make(map[string]domain.APIKey),
+		apiPrefix: make(map[string]string),
 	}
 }
 
@@ -36,6 +44,8 @@ var (
 	_ app.QueueRepository       = (*Repository)(nil)
 	_ app.MaintenanceRepository = (*Repository)(nil)
 	_ app.JobNotifier           = (*Repository)(nil)
+	_ app.ScheduleRepository    = (*Repository)(nil)
+	_ app.APIKeyRepository      = (*Repository)(nil)
 )
 
 func idempotencyIndexKey(queue, key string) string {

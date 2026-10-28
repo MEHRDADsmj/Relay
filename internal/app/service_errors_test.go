@@ -84,39 +84,39 @@ func TestService_RepoErrorsWrapped(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	svc := app.NewJobService(repo, clock, &seqIDs{ids: []domain.JobID{id}}, app.FixedDelayRetryPolicy{Delay: time.Minute}, log, nil)
 
-	_, _, err := svc.Enqueue(context.Background(), app.EnqueueCommand{Queue: "default", Type: "t"})
+	_, _, err := svc.Enqueue(adminCtx(), app.EnqueueCommand{Queue: "default", Type: "t"})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errRepoBoom)
 
-	_, err = svc.Lease(context.Background(), app.LeaseCommand{Queue: "default", WorkerID: "w1"})
+	_, err = svc.Lease(adminCtx(), app.LeaseCommand{Queue: "default", WorkerID: "w1"})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errRepoBoom)
 
-	_, err = svc.Heartbeat(context.Background(), app.HeartbeatCommand{JobID: id, WorkerID: "w1"})
+	_, err = svc.Heartbeat(adminCtx(), app.HeartbeatCommand{JobID: id, WorkerID: "w1"})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errRepoBoom)
 
-	_, err = svc.Complete(context.Background(), app.CompleteCommand{JobID: id, WorkerID: "w1"})
+	_, err = svc.Complete(adminCtx(), app.CompleteCommand{JobID: id, WorkerID: "w1"})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errRepoBoom)
 
-	_, err = svc.Fail(context.Background(), app.FailCommand{JobID: id, WorkerID: "w1", Error: "x"})
+	_, err = svc.Fail(adminCtx(), app.FailCommand{JobID: id, WorkerID: "w1", Error: "x"})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errRepoBoom)
 
-	require.ErrorIs(t, svc.Ready(context.Background()), errRepoBoom)
+	require.ErrorIs(t, svc.Ready(adminCtx()), errRepoBoom)
 }
 
 func TestFail_InvalidWorkerID(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := newService(t, time.Now().UTC())
-	_, err := svc.Fail(context.Background(), app.FailCommand{WorkerID: "", Error: "x"})
+	_, err := svc.Fail(adminCtx(), app.FailCommand{WorkerID: "", Error: "x"})
 	require.ErrorIs(t, err, domain.ErrValidation)
 }
 
 func TestHeartbeat_InvalidWorkerID(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := newService(t, time.Now().UTC())
-	_, err := svc.Heartbeat(context.Background(), app.HeartbeatCommand{WorkerID: ""})
+	_, err := svc.Heartbeat(adminCtx(), app.HeartbeatCommand{WorkerID: ""})
 	require.ErrorIs(t, err, domain.ErrValidation)
 }

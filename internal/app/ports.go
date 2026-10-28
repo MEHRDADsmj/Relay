@@ -110,3 +110,38 @@ type MaintenanceRepository interface {
 type JobNotifier interface {
 	Subscribe(ctx context.Context, queue string) (ch <-chan struct{}, unsubscribe func())
 }
+
+// CronParser validates cron expressions and computes next fire times.
+// Identical to domain.CronParser; app aliases so adapters depend on the app port.
+type CronParser = domain.CronParser
+
+// ScheduleRepository is the persistence port for cron schedules.
+type ScheduleRepository interface {
+	CreateSchedule(ctx context.Context, s domain.Schedule) (domain.Schedule, error) // ErrConflict on name
+	GetSchedule(ctx context.Context, id domain.ScheduleID) (domain.Schedule, error)
+	GetScheduleByName(ctx context.Context, name string) (domain.Schedule, error)
+	ListSchedules(ctx context.Context, page domain.PageRequest) (domain.Page[domain.Schedule], error) // by name
+	UpdateSchedule(ctx context.Context, s domain.Schedule, expectedUpdatedAt time.Time) (domain.Schedule, error)
+	DeleteSchedule(ctx context.Context, id domain.ScheduleID) error
+	// DueSchedules returns enabled schedules with next_run_at <= now, ordered by next_run_at, up to limit.
+	DueSchedules(ctx context.Context, now time.Time, limit int) ([]domain.Schedule, error)
+	// MarkFired sets last_run_at, last_job_id, next_run_at iff next_run_at still equals expectedNext.
+	MarkFired(ctx context.Context, id domain.ScheduleID, expectedNext, firedAt, next time.Time, jobID domain.JobID) error
+}
+
+// LeaderElector campaigns for cluster leadership (scheduler).
+type LeaderElector interface {
+	// Campaign blocks until leadership is acquired or ctx is done. The returned context
+	// is cancelled when leadership is lost. resign releases leadership.
+	Campaign(ctx context.Context, name string) (leaderCtx context.Context, resign func(), err error)
+}
+
+// APIKeyRepository is the persistence port for API keys.
+type APIKeyRepository interface {
+	CreateAPIKey(ctx context.Context, key domain.APIKey) (domain.APIKey, error)
+	GetAPIKey(ctx context.Context, id string) (domain.APIKey, error)
+	GetAPIKeyByPrefix(ctx context.Context, prefix string) (domain.APIKey, error)
+	ListAPIKeys(ctx context.Context) ([]domain.APIKey, error)
+	RevokeAPIKey(ctx context.Context, id string, revokedAt time.Time) (domain.APIKey, error)
+	UpdateLastUsed(ctx context.Context, id string, at time.Time) error
+}

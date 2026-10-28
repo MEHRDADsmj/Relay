@@ -21,11 +21,17 @@ func NewQueueService(queues QueueRepository, jobs JobRepository, clock Clock) *Q
 
 // ListQueues returns all registered queues.
 func (s *QueueService) ListQueues(ctx context.Context) ([]domain.Queue, error) {
+	if err := RequireScope(ctx, domain.ScopeAdmin); err != nil {
+		return nil, err
+	}
 	return s.queues.ListQueues(ctx)
 }
 
 // Stats returns aggregate counts for a queue.
 func (s *QueueService) Stats(ctx context.Context, queue string) (domain.QueueStats, error) {
+	if err := RequireScope(ctx, domain.ScopeAdmin); err != nil {
+		return domain.QueueStats{}, err
+	}
 	if err := domain.ValidateQueue(queue); err != nil {
 		return domain.QueueStats{}, err
 	}
@@ -34,6 +40,9 @@ func (s *QueueService) Stats(ctx context.Context, queue string) (domain.QueueSta
 
 // Pause marks a queue as paused (claims return empty).
 func (s *QueueService) Pause(ctx context.Context, queue string) (domain.Queue, error) {
+	if err := RequireScope(ctx, domain.ScopeAdmin); err != nil {
+		return domain.Queue{}, err
+	}
 	if err := domain.ValidateQueue(queue); err != nil {
 		return domain.Queue{}, err
 	}
@@ -42,6 +51,9 @@ func (s *QueueService) Pause(ctx context.Context, queue string) (domain.Queue, e
 
 // Resume marks a queue as not paused.
 func (s *QueueService) Resume(ctx context.Context, queue string) (domain.Queue, error) {
+	if err := RequireScope(ctx, domain.ScopeAdmin); err != nil {
+		return domain.Queue{}, err
+	}
 	if err := domain.ValidateQueue(queue); err != nil {
 		return domain.Queue{}, err
 	}
@@ -50,6 +62,9 @@ func (s *QueueService) Resume(ctx context.Context, queue string) (domain.Queue, 
 
 // RetryAllDead pages through dead jobs and retries each, up to limit.
 func (s *QueueService) RetryAllDead(ctx context.Context, cmd RetryAllDeadCommand) (int, error) {
+	if err := RequireScope(ctx, domain.ScopeAdmin); err != nil {
+		return 0, err
+	}
 	if err := domain.ValidateQueue(cmd.Queue); err != nil {
 		return 0, err
 	}

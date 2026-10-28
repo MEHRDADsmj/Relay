@@ -1,7 +1,6 @@
 package app_test
 
 import (
-	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -37,7 +36,7 @@ func TestEnqueue_CreatesPendingJob(t *testing.T) {
 	id := mustID("018f0000-0000-7000-8000-000000000001")
 	svc, _, _ := newService(t, now, id)
 
-	job, created, err := svc.Enqueue(context.Background(), app.EnqueueCommand{
+	job, created, err := svc.Enqueue(adminCtx(), app.EnqueueCommand{
 		Queue:   "default",
 		Type:    "email.send",
 		Payload: []byte(`{"to":"a@b.c"}`),
@@ -56,7 +55,7 @@ func TestEnqueue_CreatesPendingJob(t *testing.T) {
 func TestEnqueue_ValidationError(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := newService(t, time.Now().UTC(), mustID("018f0000-0000-7000-8000-000000000002"))
-	_, _, err := svc.Enqueue(context.Background(), app.EnqueueCommand{Queue: "BAD", Type: "x"})
+	_, _, err := svc.Enqueue(adminCtx(), app.EnqueueCommand{Queue: "BAD", Type: "x"})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, domain.ErrValidation))
 }
@@ -68,13 +67,13 @@ func TestEnqueue_IdempotentReplay(t *testing.T) {
 	id2 := mustID("018f0000-0000-7000-8000-000000000011")
 	svc, _, _ := newService(t, now, id1, id2)
 
-	first, created, err := svc.Enqueue(context.Background(), app.EnqueueCommand{
+	first, created, err := svc.Enqueue(adminCtx(), app.EnqueueCommand{
 		Queue: "default", Type: "t", IdempotencyKey: "k1",
 	})
 	require.NoError(t, err)
 	require.True(t, created)
 
-	second, created, err := svc.Enqueue(context.Background(), app.EnqueueCommand{
+	second, created, err := svc.Enqueue(adminCtx(), app.EnqueueCommand{
 		Queue: "default", Type: "t", IdempotencyKey: "k1",
 	})
 	require.NoError(t, err)
@@ -89,12 +88,12 @@ func TestGet_AndNotFound(t *testing.T) {
 	id := mustID("018f0000-0000-7000-8000-000000000020")
 	svc, _, _ := newService(t, now, id)
 
-	_, err := svc.Get(context.Background(), id)
+	_, err := svc.Get(adminCtx(), id)
 	require.ErrorIs(t, err, domain.ErrNotFound)
 
-	created, _, err := svc.Enqueue(context.Background(), app.EnqueueCommand{Queue: "q", Type: "t"})
+	created, _, err := svc.Enqueue(adminCtx(), app.EnqueueCommand{Queue: "q", Type: "t"})
 	require.NoError(t, err)
-	got, err := svc.Get(context.Background(), created.ID)
+	got, err := svc.Get(adminCtx(), created.ID)
 	require.NoError(t, err)
 	assert.Equal(t, created.ID, got.ID)
 }
@@ -105,10 +104,10 @@ func TestLease_ClaimsAndIncrementsAttempts(t *testing.T) {
 	id := mustID("018f0000-0000-7000-8000-000000000030")
 	svc, _, _ := newService(t, now, id)
 
-	_, _, err := svc.Enqueue(context.Background(), app.EnqueueCommand{Queue: "default", Type: "t"})
+	_, _, err := svc.Enqueue(adminCtx(), app.EnqueueCommand{Queue: "default", Type: "t"})
 	require.NoError(t, err)
 
-	jobs, err := svc.Lease(context.Background(), app.LeaseCommand{
+	jobs, err := svc.Lease(adminCtx(), app.LeaseCommand{
 		Queue: "default", WorkerID: "w1", MaxJobs: 1, LeaseDuration: 30 * time.Second,
 	})
 	require.NoError(t, err)
@@ -123,7 +122,7 @@ func TestLease_ClaimsAndIncrementsAttempts(t *testing.T) {
 func TestLease_Validation(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := newService(t, time.Now().UTC())
-	_, err := svc.Lease(context.Background(), app.LeaseCommand{Queue: "default", WorkerID: ""})
+	_, err := svc.Lease(adminCtx(), app.LeaseCommand{Queue: "default", WorkerID: ""})
 	require.ErrorIs(t, err, domain.ErrValidation)
 }
 
@@ -132,11 +131,11 @@ func TestLease_Defaults(t *testing.T) {
 	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 	id := mustID("018f0000-0000-7000-8000-000000000031")
 	svc, _, _ := newService(t, now, id)
-	_, _, err := svc.Enqueue(context.Background(), app.EnqueueCommand{Queue: "default", Type: "t"})
+	_, _, err := svc.Enqueue(adminCtx(), app.EnqueueCommand{Queue: "default", Type: "t"})
 	require.NoError(t, err)
 
-	jobs, err := svc.Lease(context.Background(), app.LeaseCommand{
-		Queue: "default", WorkerID: "w1", // MaxJobs 0, LeaseDuration 0 → defaults
+	jobs, err := svc.Lease(adminCtx(), app.LeaseCommand{
+		Queue: "default", WorkerID: "w1", // MaxJobs 0, LeaseDuration 0 ? defaults
 	})
 	require.NoError(t, err)
 	require.Len(t, jobs, 1)
@@ -148,16 +147,16 @@ func TestHeartbeat_ExtendsLease(t *testing.T) {
 	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 	id := mustID("018f0000-0000-7000-8000-000000000040")
 	svc, _, clock := newService(t, now, id)
-	_, _, err := svc.Enqueue(context.Background(), app.EnqueueCommand{Queue: "default", Type: "t"})
+	_, _, err := svc.Enqueue(adminCtx(), app.EnqueueCommand{Queue: "default", Type: "t"})
 	require.NoError(t, err)
-	leased, err := svc.Lease(context.Background(), app.LeaseCommand{
+	leased, err := svc.Lease(adminCtx(), app.LeaseCommand{
 		Queue: "default", WorkerID: "w1", MaxJobs: 1, LeaseDuration: 30 * time.Second,
 	})
 	require.NoError(t, err)
 
 	later := now.Add(10 * time.Second)
 	clock.Set(later)
-	job, err := svc.Heartbeat(context.Background(), app.HeartbeatCommand{
+	job, err := svc.Heartbeat(adminCtx(), app.HeartbeatCommand{
 		JobID: leased[0].ID, WorkerID: "w1", LeaseDuration: 30 * time.Second,
 	})
 	require.NoError(t, err)
@@ -170,14 +169,14 @@ func TestHeartbeat_WrongOwner(t *testing.T) {
 	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 	id := mustID("018f0000-0000-7000-8000-000000000041")
 	svc, _, _ := newService(t, now, id)
-	_, _, err := svc.Enqueue(context.Background(), app.EnqueueCommand{Queue: "default", Type: "t"})
+	_, _, err := svc.Enqueue(adminCtx(), app.EnqueueCommand{Queue: "default", Type: "t"})
 	require.NoError(t, err)
-	leased, err := svc.Lease(context.Background(), app.LeaseCommand{
+	leased, err := svc.Lease(adminCtx(), app.LeaseCommand{
 		Queue: "default", WorkerID: "w1", MaxJobs: 1, LeaseDuration: 30 * time.Second,
 	})
 	require.NoError(t, err)
 
-	_, err = svc.Heartbeat(context.Background(), app.HeartbeatCommand{
+	_, err = svc.Heartbeat(adminCtx(), app.HeartbeatCommand{
 		JobID: leased[0].ID, WorkerID: "other", LeaseDuration: 30 * time.Second,
 	})
 	require.ErrorIs(t, err, domain.ErrLeaseLost)
@@ -188,14 +187,14 @@ func TestComplete_Succeeds(t *testing.T) {
 	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 	id := mustID("018f0000-0000-7000-8000-000000000050")
 	svc, _, _ := newService(t, now, id)
-	_, _, err := svc.Enqueue(context.Background(), app.EnqueueCommand{Queue: "default", Type: "t"})
+	_, _, err := svc.Enqueue(adminCtx(), app.EnqueueCommand{Queue: "default", Type: "t"})
 	require.NoError(t, err)
-	leased, err := svc.Lease(context.Background(), app.LeaseCommand{
+	leased, err := svc.Lease(adminCtx(), app.LeaseCommand{
 		Queue: "default", WorkerID: "w1", MaxJobs: 1, LeaseDuration: 30 * time.Second,
 	})
 	require.NoError(t, err)
 
-	job, err := svc.Complete(context.Background(), app.CompleteCommand{JobID: leased[0].ID, WorkerID: "w1"})
+	job, err := svc.Complete(adminCtx(), app.CompleteCommand{JobID: leased[0].ID, WorkerID: "w1"})
 	require.NoError(t, err)
 	assert.Equal(t, domain.StatusSucceeded, job.Status)
 	require.NotNil(t, job.FinishedAt)
@@ -210,17 +209,17 @@ func TestFail_RetriesWhenAttemptsRemain(t *testing.T) {
 	id := mustID("018f0000-0000-7000-8000-000000000060")
 	max := 3
 	svc, _, _ := newService(t, now, id)
-	_, _, err := svc.Enqueue(context.Background(), app.EnqueueCommand{
+	_, _, err := svc.Enqueue(adminCtx(), app.EnqueueCommand{
 		Queue: "default", Type: "t", MaxAttempts: &max,
 	})
 	require.NoError(t, err)
-	leased, err := svc.Lease(context.Background(), app.LeaseCommand{
+	leased, err := svc.Lease(adminCtx(), app.LeaseCommand{
 		Queue: "default", WorkerID: "w1", MaxJobs: 1, LeaseDuration: 30 * time.Second,
 	})
 	require.NoError(t, err)
 	require.Equal(t, 1, leased[0].Attempts)
 
-	job, err := svc.Fail(context.Background(), app.FailCommand{
+	job, err := svc.Fail(adminCtx(), app.FailCommand{
 		JobID: leased[0].ID, WorkerID: "w1", Error: "boom",
 	})
 	require.NoError(t, err)
@@ -236,17 +235,17 @@ func TestFail_MarksDeadWhenAttemptsExhausted(t *testing.T) {
 	id := mustID("018f0000-0000-7000-8000-000000000061")
 	max := 1
 	svc, _, clock := newService(t, now, id)
-	_, _, err := svc.Enqueue(context.Background(), app.EnqueueCommand{
+	_, _, err := svc.Enqueue(adminCtx(), app.EnqueueCommand{
 		Queue: "default", Type: "t", MaxAttempts: &max,
 	})
 	require.NoError(t, err)
-	leased, err := svc.Lease(context.Background(), app.LeaseCommand{
+	leased, err := svc.Lease(adminCtx(), app.LeaseCommand{
 		Queue: "default", WorkerID: "w1", MaxJobs: 1, LeaseDuration: 30 * time.Second,
 	})
 	require.NoError(t, err)
 	require.Equal(t, 1, leased[0].Attempts)
 
-	job, err := svc.Fail(context.Background(), app.FailCommand{
+	job, err := svc.Fail(adminCtx(), app.FailCommand{
 		JobID: leased[0].ID, WorkerID: "w1", Error: "fatal",
 	})
 	require.NoError(t, err)
@@ -260,15 +259,15 @@ func TestFail_LeaseLostBeforeWrite(t *testing.T) {
 	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 	id := mustID("018f0000-0000-7000-8000-000000000062")
 	svc, _, clock := newService(t, now, id)
-	_, _, err := svc.Enqueue(context.Background(), app.EnqueueCommand{Queue: "default", Type: "t"})
+	_, _, err := svc.Enqueue(adminCtx(), app.EnqueueCommand{Queue: "default", Type: "t"})
 	require.NoError(t, err)
-	leased, err := svc.Lease(context.Background(), app.LeaseCommand{
+	leased, err := svc.Lease(adminCtx(), app.LeaseCommand{
 		Queue: "default", WorkerID: "w1", MaxJobs: 1, LeaseDuration: 30 * time.Second,
 	})
 	require.NoError(t, err)
 
 	clock.Set(now.Add(31 * time.Second))
-	_, err = svc.Fail(context.Background(), app.FailCommand{
+	_, err = svc.Fail(adminCtx(), app.FailCommand{
 		JobID: leased[0].ID, WorkerID: "w1", Error: "late",
 	})
 	require.ErrorIs(t, err, domain.ErrLeaseLost)
@@ -279,15 +278,15 @@ func TestFail_TruncatesErrorMessage(t *testing.T) {
 	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 	id := mustID("018f0000-0000-7000-8000-000000000063")
 	svc, _, _ := newService(t, now, id)
-	_, _, err := svc.Enqueue(context.Background(), app.EnqueueCommand{Queue: "default", Type: "t"})
+	_, _, err := svc.Enqueue(adminCtx(), app.EnqueueCommand{Queue: "default", Type: "t"})
 	require.NoError(t, err)
-	leased, err := svc.Lease(context.Background(), app.LeaseCommand{
+	leased, err := svc.Lease(adminCtx(), app.LeaseCommand{
 		Queue: "default", WorkerID: "w1", MaxJobs: 1, LeaseDuration: 30 * time.Second,
 	})
 	require.NoError(t, err)
 
 	long := strings.Repeat("x", domain.MaxErrorMessageBytes+50)
-	job, err := svc.Fail(context.Background(), app.FailCommand{
+	job, err := svc.Fail(adminCtx(), app.FailCommand{
 		JobID: leased[0].ID, WorkerID: "w1", Error: long,
 	})
 	require.NoError(t, err)
@@ -297,7 +296,7 @@ func TestFail_TruncatesErrorMessage(t *testing.T) {
 func TestReady(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := newService(t, time.Now().UTC())
-	require.NoError(t, svc.Ready(context.Background()))
+	require.NoError(t, svc.Ready(adminCtx()))
 }
 
 func TestFixedDelayRetryPolicy(t *testing.T) {
@@ -327,27 +326,27 @@ func TestNewJobService_NilLogger(t *testing.T) {
 	t.Parallel()
 	svc := app.NewJobService(newMemRepo(), &fixedClock{now: time.Now().UTC()}, app.UUIDv7Generator{}, app.FixedDelayRetryPolicy{Delay: time.Second}, nil, nil)
 	require.NotNil(t, svc)
-	require.NoError(t, svc.Ready(context.Background()))
+	require.NoError(t, svc.Ready(adminCtx()))
 }
 
 func TestComplete_Validation(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := newService(t, time.Now().UTC())
-	_, err := svc.Complete(context.Background(), app.CompleteCommand{WorkerID: ""})
+	_, err := svc.Complete(adminCtx(), app.CompleteCommand{WorkerID: ""})
 	require.ErrorIs(t, err, domain.ErrValidation)
 }
 
 func TestHeartbeat_Validation(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := newService(t, time.Now().UTC())
-	_, err := svc.Heartbeat(context.Background(), app.HeartbeatCommand{WorkerID: "w", LeaseDuration: time.Second})
+	_, err := svc.Heartbeat(adminCtx(), app.HeartbeatCommand{WorkerID: "w", LeaseDuration: time.Second})
 	require.ErrorIs(t, err, domain.ErrValidation) // lease too short
 }
 
 func TestFail_NotFound(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := newService(t, time.Now().UTC())
-	_, err := svc.Fail(context.Background(), app.FailCommand{
+	_, err := svc.Fail(adminCtx(), app.FailCommand{
 		JobID: mustID("018f0000-0000-7000-8000-000000000099"), WorkerID: "w1", Error: "x",
 	})
 	require.ErrorIs(t, err, domain.ErrNotFound)
@@ -356,7 +355,7 @@ func TestFail_NotFound(t *testing.T) {
 func TestLease_InvalidMaxJobs(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := newService(t, time.Now().UTC())
-	_, err := svc.Lease(context.Background(), app.LeaseCommand{
+	_, err := svc.Lease(adminCtx(), app.LeaseCommand{
 		Queue: "default", WorkerID: "w1", MaxJobs: 101,
 	})
 	require.ErrorIs(t, err, domain.ErrValidation)
@@ -365,7 +364,7 @@ func TestLease_InvalidMaxJobs(t *testing.T) {
 func TestLease_InvalidQueue(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := newService(t, time.Now().UTC())
-	_, err := svc.Lease(context.Background(), app.LeaseCommand{
+	_, err := svc.Lease(adminCtx(), app.LeaseCommand{
 		Queue: "BAD", WorkerID: "w1",
 	})
 	require.ErrorIs(t, err, domain.ErrValidation)

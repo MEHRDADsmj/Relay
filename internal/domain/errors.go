@@ -9,6 +9,8 @@ var (
 	ErrLeaseLost         = errors.New("lease lost")
 	ErrConflict          = errors.New("conflict")
 	ErrInvalidTransition = errors.New("invalid transition")
+	ErrUnauthenticated   = errors.New("unauthenticated")
+	ErrForbidden         = errors.New("forbidden")
 )
 
 // ValidationError carries field-level detail and unwraps to ErrValidation.

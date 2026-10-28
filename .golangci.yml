@@ -55,6 +55,7 @@ linters:
           files:
             - "**/internal/app/*.go"
             - "**/internal/app/**/*.go"
+            - "!**/*_test.go"
           deny:
             - pkg: net/http
               desc: app must not import net/http
@@ -68,6 +69,8 @@ linters:
               desc: app must not import redis
             - pkg: github.com/go-chi/chi
               desc: app must not import chi
+            - pkg: github.com/robfig/cron
+              desc: app must not import robfig; use adapter/cron
         # Adapters must not import sibling adapters.
         http-adapter:
           list-mode: lax

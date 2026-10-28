@@ -85,41 +85,41 @@ func TestQueueService_PauseResumeStatsRetryAll(t *testing.T) {
 	qs := app.NewQueueService(repo, repo, clock)
 	js := app.NewJobService(repo, clock, app.UUIDv7Generator{}, app.FixedDelayRetryPolicy{Delay: time.Second}, nil, nil)
 
-	_, _, err := js.Enqueue(context.Background(), app.EnqueueCommand{Queue: "q1", Type: "t"})
+	_, _, err := js.Enqueue(adminCtx(), app.EnqueueCommand{Queue: "q1", Type: "t"})
 	require.NoError(t, err)
 
-	paused, err := qs.Pause(context.Background(), "q1")
+	paused, err := qs.Pause(adminCtx(), "q1")
 	require.NoError(t, err)
 	assert.True(t, paused.Paused)
 
-	jobs, err := js.Lease(context.Background(), app.LeaseCommand{
+	jobs, err := js.Lease(adminCtx(), app.LeaseCommand{
 		Queue: "q1", WorkerID: "w1", MaxJobs: 1, LeaseDuration: 30 * time.Second,
 	})
 	require.NoError(t, err)
 	assert.Empty(t, jobs)
 
-	_, err = qs.Resume(context.Background(), "q1")
+	_, err = qs.Resume(adminCtx(), "q1")
 	require.NoError(t, err)
 
-	stats, err := qs.Stats(context.Background(), "q1")
+	stats, err := qs.Stats(adminCtx(), "q1")
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), stats.Pending)
 
-	leased, err := js.Lease(context.Background(), app.LeaseCommand{
+	leased, err := js.Lease(adminCtx(), app.LeaseCommand{
 		Queue: "q1", WorkerID: "w1", MaxJobs: 1, LeaseDuration: 30 * time.Second,
 	})
 	require.NoError(t, err)
 	require.Len(t, leased, 1)
-	_, err = js.Fail(context.Background(), app.FailCommand{
+	_, err = js.Fail(adminCtx(), app.FailCommand{
 		JobID: leased[0].ID, WorkerID: "w1", Error: "x", Permanent: true,
 	})
 	require.NoError(t, err)
 
-	n, err := qs.RetryAllDead(context.Background(), app.RetryAllDeadCommand{Queue: "q1", Limit: 10})
+	n, err := qs.RetryAllDead(adminCtx(), app.RetryAllDeadCommand{Queue: "q1", Limit: 10})
 	require.NoError(t, err)
 	assert.Equal(t, 1, n)
 
-	lists, err := qs.ListQueues(context.Background())
+	lists, err := qs.ListQueues(adminCtx())
 	require.NoError(t, err)
 	require.NotEmpty(t, lists)
 }
@@ -128,6 +128,6 @@ func TestQueueService_RetryAllDeadValidation(t *testing.T) {
 	t.Parallel()
 	repo := newQueueMem()
 	qs := app.NewQueueService(repo, repo, &fixedClock{now: time.Now().UTC()})
-	_, err := qs.RetryAllDead(context.Background(), app.RetryAllDeadCommand{Queue: "BAD"})
+	_, err := qs.RetryAllDead(adminCtx(), app.RetryAllDeadCommand{Queue: "BAD"})
 	require.ErrorIs(t, err, domain.ErrValidation)
 }

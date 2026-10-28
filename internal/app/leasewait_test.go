@@ -85,10 +85,10 @@ func TestLeaseWait_ImmediateHit(t *testing.T) {
 	id := mustID("018f0000-0000-7000-8000-000000000100")
 	n := newFakeNotifier()
 	svc, _, _ := newServiceWithNotifier(t, now, n, id)
-	_, _, err := svc.Enqueue(context.Background(), app.EnqueueCommand{Queue: "default", Type: "t"})
+	_, _, err := svc.Enqueue(adminCtx(), app.EnqueueCommand{Queue: "default", Type: "t"})
 	require.NoError(t, err)
 
-	jobs, err := svc.LeaseWait(context.Background(), app.LeaseCommand{
+	jobs, err := svc.LeaseWait(adminCtx(), app.LeaseCommand{
 		Queue: "default", WorkerID: "w1", MaxJobs: 1, LeaseDuration: 30 * time.Second, Wait: 5 * time.Second,
 	})
 	require.NoError(t, err)
@@ -106,7 +106,7 @@ func TestLeaseWait_WakeupHit(t *testing.T) {
 	done := make(chan []domain.Job, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		jobs, err := svc.LeaseWait(context.Background(), app.LeaseCommand{
+		jobs, err := svc.LeaseWait(adminCtx(), app.LeaseCommand{
 			Queue: "default", WorkerID: "w1", MaxJobs: 1, LeaseDuration: 30 * time.Second, Wait: 3 * time.Second,
 		})
 		errCh <- err
@@ -114,7 +114,7 @@ func TestLeaseWait_WakeupHit(t *testing.T) {
 	}()
 
 	time.Sleep(50 * time.Millisecond)
-	_, _, err := svc.Enqueue(context.Background(), app.EnqueueCommand{Queue: "default", Type: "t"})
+	_, _, err := svc.Enqueue(adminCtx(), app.EnqueueCommand{Queue: "default", Type: "t"})
 	require.NoError(t, err)
 	n.Notify("default")
 
@@ -134,7 +134,7 @@ func TestLeaseWait_Timeout(t *testing.T) {
 	svc, _, _ := newServiceWithNotifier(t, now, n)
 
 	start := time.Now()
-	jobs, err := svc.LeaseWait(context.Background(), app.LeaseCommand{
+	jobs, err := svc.LeaseWait(adminCtx(), app.LeaseCommand{
 		Queue: "default", WorkerID: "w1", MaxJobs: 1, LeaseDuration: 30 * time.Second, Wait: 200 * time.Millisecond,
 	})
 	require.NoError(t, err)
@@ -148,7 +148,7 @@ func TestLeaseWait_CtxCancel(t *testing.T) {
 	n := newFakeNotifier()
 	svc, _, _ := newServiceWithNotifier(t, now, n)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(adminCtx())
 	errCh := make(chan error, 1)
 	go func() {
 		_, err := svc.LeaseWait(ctx, app.LeaseCommand{
@@ -175,7 +175,7 @@ func TestLeaseWait_SpuriousWakeup(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		jobs, err := svc.LeaseWait(context.Background(), app.LeaseCommand{
+		jobs, err := svc.LeaseWait(adminCtx(), app.LeaseCommand{
 			Queue: "default", WorkerID: "w1", MaxJobs: 1, LeaseDuration: 30 * time.Second, Wait: 300 * time.Millisecond,
 		})
 		require.NoError(t, err)

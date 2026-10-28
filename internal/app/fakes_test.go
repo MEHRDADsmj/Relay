@@ -11,6 +11,22 @@ import (
 	"github.com/MEHRDADsmj/relay/internal/domain"
 )
 
+func adminCtx() context.Context {
+	return app.WithPrincipal(context.Background(), domain.Principal{
+		KeyID:  "test-admin",
+		Name:   "test",
+		Scopes: []domain.Scope{domain.ScopeAdmin},
+	})
+}
+
+func principalCtx(scopes ...domain.Scope) context.Context {
+	return app.WithPrincipal(context.Background(), domain.Principal{
+		KeyID:  "test",
+		Name:   "test",
+		Scopes: scopes,
+	})
+}
+
 // fixedClock returns a controllable now.
 type fixedClock struct {
 	mu  sync.Mutex
@@ -53,6 +69,10 @@ func mustID(s string) domain.JobID {
 		panic(err)
 	}
 	return id
+}
+
+func uuidShort() string {
+	return uuid.NewString()[:8]
 }
 
 // memRepo is a minimal in-memory JobRepository for app unit tests.
