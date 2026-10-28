@@ -400,6 +400,12 @@ func TestLease_LongPollClientDisconnect(t *testing.T) {
 	wg.Wait()
 	elapsed := time.Since(start)
 	require.Less(t, elapsed, 2*time.Second, "handler should return promptly on client disconnect")
+	require.Equal(t, http.StatusOK, rec.Code, "disconnect must not be 500")
+	var lease map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &lease))
+	jobs, ok := lease["jobs"].([]any)
+	require.True(t, ok)
+	require.Empty(t, jobs)
 }
 
 func TestLease_WaitSecondsValidation(t *testing.T) {

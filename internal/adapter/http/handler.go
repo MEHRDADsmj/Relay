@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/MEHRDADsmj/relay/internal/adapter/http/oapi"
@@ -76,6 +77,10 @@ func (h *Handler) LeaseJobs(ctx context.Context, request oapi.LeaseJobsRequestOb
 	}
 	jobs, err := h.jobs.LeaseWait(ctx, leaseCommand(request.Queue, *request.Body))
 	if err != nil {
+		// Client disconnect during long-poll: return empty leases, not 500.
+		if errors.Is(err, context.Canceled) {
+			return oapi.LeaseJobs200JSONResponse{Jobs: []oapi.Job{}}, nil
+		}
 		return nil, err
 	}
 	if jobs == nil {
