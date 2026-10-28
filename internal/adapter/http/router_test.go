@@ -58,6 +58,7 @@ func testRouter(t *testing.T, apiKey string) (http.Handler, *app.JobService) {
 		&seqIDs{ids: []domain.JobID{id1, id2}},
 		app.FixedDelayRetryPolicy{Delay: time.Second},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		nil,
 	)
 	h := relayhttp.NewRouter(svc, relayhttp.Options{
 		APIKey: apiKey,
@@ -295,7 +296,7 @@ func TestErrors_BodyTooLarge(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
 	repo := memory.New()
-	svc := app.NewJobService(repo, fixedClock{t: now}, &seqIDs{}, app.FixedDelayRetryPolicy{Delay: time.Second}, nil)
+	svc := app.NewJobService(repo, fixedClock{t: now}, &seqIDs{}, app.FixedDelayRetryPolicy{Delay: time.Second}, nil, nil)
 	h := relayhttp.NewRouter(svc, relayhttp.Options{
 		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 		MaxBodyBytes: 64,
@@ -377,6 +378,7 @@ func TestReadyz_Unavailable(t *testing.T) {
 		&seqIDs{},
 		app.FixedDelayRetryPolicy{Delay: time.Second},
 		nil,
+		nil,
 	)
 	h := relayhttp.NewRouter(svc, relayhttp.Options{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -394,6 +396,7 @@ func TestErrors_InternalServerError(t *testing.T) {
 		&seqIDs{ids: []domain.JobID{uuid.Must(uuid.Parse("01900000-0000-7000-8000-000000000010"))}},
 		app.FixedDelayRetryPolicy{Delay: time.Second},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		nil,
 	)
 	h := relayhttp.NewRouter(svc, relayhttp.Options{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -492,6 +495,26 @@ func (failingPingRepo) Fail(context.Context, domain.JobID, string, string, domai
 	return domain.Job{}, domain.ErrNotFound
 }
 
+func (failingPingRepo) Release(context.Context, domain.JobID, string, time.Time) (domain.Job, error) {
+	return domain.Job{}, domain.ErrNotFound
+}
+
+func (failingPingRepo) Cancel(context.Context, domain.JobID, time.Time) (domain.Job, error) {
+	return domain.Job{}, domain.ErrNotFound
+}
+
+func (failingPingRepo) Retry(context.Context, domain.JobID, time.Time) (domain.Job, error) {
+	return domain.Job{}, domain.ErrNotFound
+}
+
+func (failingPingRepo) ListAttempts(context.Context, domain.JobID) ([]domain.Attempt, error) {
+	return nil, domain.ErrNotFound
+}
+
+func (failingPingRepo) ListByStatus(context.Context, string, domain.Status, domain.PageRequest) (domain.Page[domain.Job], error) {
+	return domain.Page[domain.Job]{}, domain.ErrNotFound
+}
+
 func (failingPingRepo) Ping(context.Context) error {
 	return context.DeadlineExceeded
 }
@@ -523,6 +546,26 @@ func (errorCreateRepo) Complete(context.Context, domain.JobID, string, time.Time
 
 func (errorCreateRepo) Fail(context.Context, domain.JobID, string, string, domain.FailureDecision, time.Time) (domain.Job, error) {
 	return domain.Job{}, domain.ErrNotFound
+}
+
+func (errorCreateRepo) Release(context.Context, domain.JobID, string, time.Time) (domain.Job, error) {
+	return domain.Job{}, domain.ErrNotFound
+}
+
+func (errorCreateRepo) Cancel(context.Context, domain.JobID, time.Time) (domain.Job, error) {
+	return domain.Job{}, domain.ErrNotFound
+}
+
+func (errorCreateRepo) Retry(context.Context, domain.JobID, time.Time) (domain.Job, error) {
+	return domain.Job{}, domain.ErrNotFound
+}
+
+func (errorCreateRepo) ListAttempts(context.Context, domain.JobID) ([]domain.Attempt, error) {
+	return nil, domain.ErrNotFound
+}
+
+func (errorCreateRepo) ListByStatus(context.Context, string, domain.Status, domain.PageRequest) (domain.Page[domain.Job], error) {
+	return domain.Page[domain.Job]{}, domain.ErrNotFound
 }
 
 func (errorCreateRepo) Ping(context.Context) error { return nil }

@@ -49,6 +49,26 @@ func (r *errRepo) Fail(context.Context, domain.JobID, string, string, domain.Fai
 	return domain.Job{}, errRepoBoom
 }
 
+func (r *errRepo) Release(context.Context, domain.JobID, string, time.Time) (domain.Job, error) {
+	return domain.Job{}, errRepoBoom
+}
+
+func (r *errRepo) Cancel(context.Context, domain.JobID, time.Time) (domain.Job, error) {
+	return domain.Job{}, errRepoBoom
+}
+
+func (r *errRepo) Retry(context.Context, domain.JobID, time.Time) (domain.Job, error) {
+	return domain.Job{}, errRepoBoom
+}
+
+func (r *errRepo) ListAttempts(context.Context, domain.JobID) ([]domain.Attempt, error) {
+	return nil, errRepoBoom
+}
+
+func (r *errRepo) ListByStatus(context.Context, string, domain.Status, domain.PageRequest) (domain.Page[domain.Job], error) {
+	return domain.Page[domain.Job]{}, errRepoBoom
+}
+
 func (r *errRepo) Ping(context.Context) error { return errRepoBoom }
 
 func TestService_RepoErrorsWrapped(t *testing.T) {
@@ -62,7 +82,7 @@ func TestService_RepoErrorsWrapped(t *testing.T) {
 	}}
 	clock := &fixedClock{now: now}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc := app.NewJobService(repo, clock, &seqIDs{ids: []domain.JobID{id}}, app.FixedDelayRetryPolicy{Delay: time.Minute}, log)
+	svc := app.NewJobService(repo, clock, &seqIDs{ids: []domain.JobID{id}}, app.FixedDelayRetryPolicy{Delay: time.Minute}, log, nil)
 
 	_, _, err := svc.Enqueue(context.Background(), app.EnqueueCommand{Queue: "default", Type: "t"})
 	require.Error(t, err)

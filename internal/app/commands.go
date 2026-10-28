@@ -17,12 +17,13 @@ type EnqueueCommand struct {
 	IdempotencyKey string
 }
 
-// LeaseCommand is the input for JobService.Lease.
+// LeaseCommand is the input for JobService.Lease and LeaseWait.
 type LeaseCommand struct {
 	Queue         string
 	WorkerID      string
 	MaxJobs       int
 	LeaseDuration time.Duration
+	Wait          time.Duration // 0..30s; used by LeaseWait only
 }
 
 // HeartbeatCommand is the input for JobService.Heartbeat.
@@ -40,7 +41,27 @@ type CompleteCommand struct {
 
 // FailCommand is the input for JobService.Fail.
 type FailCommand struct {
+	JobID     domain.JobID
+	WorkerID  string
+	Error     string
+	Permanent bool // force dead without retry
+}
+
+// ReleaseCommand is the input for JobService.Release.
+type ReleaseCommand struct {
 	JobID    domain.JobID
 	WorkerID string
-	Error    string
+}
+
+// ListByStatusCommand is the input for JobService.ListByStatus.
+type ListByStatusCommand struct {
+	Queue  string
+	Status domain.Status
+	Page   domain.PageRequest
+}
+
+// RetryAllDeadCommand is the input for QueueService.RetryAllDead.
+type RetryAllDeadCommand struct {
+	Queue string
+	Limit int // 1..10000, default 1000
 }

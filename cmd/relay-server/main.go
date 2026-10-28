@@ -91,6 +91,7 @@ func runServe() error {
 		app.UUIDv7Generator{},
 		app.FixedDelayRetryPolicy{Delay: cfg.RetryDelay},
 		log,
+		nil, // notifier wired in P2-T7
 	)
 	handler := adapterhttp.NewRouter(svc, adapterhttp.Options{
 		APIKey: cfg.APIKey,

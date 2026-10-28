@@ -27,7 +27,7 @@ func newService(t *testing.T, now time.Time, ids ...domain.JobID) (*app.JobServi
 		gen = app.UUIDv7Generator{}
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc := app.NewJobService(repo, clock, gen, app.FixedDelayRetryPolicy{Delay: time.Minute}, log)
+	svc := app.NewJobService(repo, clock, gen, app.FixedDelayRetryPolicy{Delay: time.Minute}, log, nil)
 	return svc, repo, clock
 }
 
@@ -325,7 +325,7 @@ func uuidVersion(id domain.JobID) byte {
 
 func TestNewJobService_NilLogger(t *testing.T) {
 	t.Parallel()
-	svc := app.NewJobService(newMemRepo(), &fixedClock{now: time.Now().UTC()}, app.UUIDv7Generator{}, app.FixedDelayRetryPolicy{Delay: time.Second}, nil)
+	svc := app.NewJobService(newMemRepo(), &fixedClock{now: time.Now().UTC()}, app.UUIDv7Generator{}, app.FixedDelayRetryPolicy{Delay: time.Second}, nil, nil)
 	require.NotNil(t, svc)
 	require.NoError(t, svc.Ready(context.Background()))
 }

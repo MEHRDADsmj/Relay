@@ -127,6 +127,7 @@ func runE2E(t *testing.T, start func(*testing.T, context.Context) backend) {
 		app.UUIDv7Generator{},
 		app.FixedDelayRetryPolicy{Delay: retryDelay},
 		log,
+		nil,
 	)
 	handler := adapterhttp.NewRouter(svc, adapterhttp.Options{
 		APIKey: apiKey,

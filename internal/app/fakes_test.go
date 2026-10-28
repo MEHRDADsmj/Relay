@@ -265,4 +265,94 @@ func (r *memRepo) Fail(_ context.Context, id domain.JobID, owner string, errMsg 
 
 func (r *memRepo) Ping(context.Context) error { return nil }
 
+func (r *memRepo) Release(_ context.Context, id domain.JobID, owner string, now time.Time) (domain.Job, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	j, err := r.owned(id, owner, now)
+	if err != nil {
+		return domain.Job{}, err
+	}
+	j.Status = domain.StatusPending
+	if j.Attempts > 0 {
+		j.Attempts--
+	}
+	j.RunAt = now
+	j.LeaseOwner = ""
+	j.LeaseExpiresAt = nil
+	j.UpdatedAt = now
+	r.jobs[id] = j
+	return cloneJob(j), nil
+}
+
+func (r *memRepo) Cancel(_ context.Context, id domain.JobID, now time.Time) (domain.Job, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	j, ok := r.jobs[id]
+	if !ok {
+		return domain.Job{}, domain.ErrNotFound
+	}
+	if err := j.CanCancel(); err != nil {
+		return domain.Job{}, err
+	}
+	switch j.Status {
+	case domain.StatusPending:
+		fin := now
+		j.Status = domain.StatusCancelled
+		j.FinishedAt = &fin
+		j.CancelledAt = &fin
+		j.UpdatedAt = now
+	case domain.StatusRunning:
+		j.CancelRequested = true
+		j.UpdatedAt = now
+	}
+	r.jobs[id] = j
+	return cloneJob(j), nil
+}
+
+func (r *memRepo) Retry(_ context.Context, id domain.JobID, now time.Time) (domain.Job, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	j, ok := r.jobs[id]
+	if !ok {
+		return domain.Job{}, domain.ErrNotFound
+	}
+	if err := j.CanRetry(); err != nil {
+		return domain.Job{}, err
+	}
+	j.Status = domain.StatusPending
+	j.Attempts = 0
+	j.RunAt = now
+	j.FinishedAt = nil
+	j.CancelledAt = nil
+	j.CancelRequested = false
+	j.LeaseOwner = ""
+	j.LeaseExpiresAt = nil
+	j.UpdatedAt = now
+	r.jobs[id] = j
+	return cloneJob(j), nil
+}
+
+func (r *memRepo) ListAttempts(context.Context, domain.JobID) ([]domain.Attempt, error) {
+	return nil, nil
+}
+
+func (r *memRepo) ListByStatus(_ context.Context, queue string, status domain.Status, page domain.PageRequest) (domain.Page[domain.Job], error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	limit := page.Limit
+	if limit <= 0 {
+		limit = domain.DefaultPageLimit
+	}
+	var items []domain.Job
+	for _, j := range r.jobs {
+		if j.Queue == queue && j.Status == status {
+			items = append(items, cloneJob(j))
+		}
+	}
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return domain.Page[domain.Job]{Items: items}, nil
+}
+
 var _ app.JobRepository = (*memRepo)(nil)
