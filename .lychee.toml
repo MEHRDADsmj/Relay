@@ -1,0 +1,35 @@
+#############################  Display  #############################
+verbose = "warning"
+
+#############################  Runtime  #############################
+max_concurrency = 8
+timeout = 20
+
+#############################  Requests  #############################
+# Accept rate-limit responses so flaky third-party badges do not fail CI.
+accept = ["200..=299", "429"]
+
+#############################  Exclusions  #############################
+exclude = [
+  '^https?://localhost(:\\d+)?',
+  '^https?://127\\.0\\.0\\.1(:\\d+)?',
+  '^https?://0\\.0\\.0\\.0(:\\d+)?',
+  '^https?://host\\.docker\\.internal(:\\d+)?',
+  '^https?://[^/]+:(3300|54329|63799|7420|7421|7429|9390|16686|9464)\\b',
+  # Optional local / unpublished paths referenced as future media.
+  'dashboard-demo\\.gif$',
+  'relayctl-demo\\.gif$',
+  'grafana-overview\\.png$',
+  'jaeger-linked-spans\\.png$',
+]
+
+exclude_path = [
+  "vendor",
+  ".git",
+  "bin",
+  ".tools",
+  "loadtest/results",
+  ".superpowers",
+]
+
+scheme = ["https", "http", "file"]

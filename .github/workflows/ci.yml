@@ -193,6 +193,26 @@ jobs:
       - name: Run govulncheck
         run: govulncheck ./...
 
+  links:
+    name: links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Markdown link check (lychee)
+        run: |
+          docker run --rm \
+            -v "$PWD:/input:ro" \
+            -w /input \
+            lycheeverse/lychee:0.24.2 \
+            --config .lychee.toml \
+            --no-progress \
+            --offline \
+            README.md CONTRIBUTING.md \
+            'docs/**/*.md' \
+            'examples/**/*.md' \
+            'deploy/**/*.md' \
+            'loadtest/**/*.md'
+
   goreleaser:
     name: goreleaser
     runs-on: ubuntu-latest

@@ -60,9 +60,9 @@ K6_IMAGE ?= grafana/k6:0.54.0
 LOADTEST_SCRIPT ?= enqueue.js
 LOADTEST_RESULTS_DIR := $(CURDIR)/loadtest/results
 
-.PHONY: help tools generate css lint test test-integration test-e2e cover build release-snapshot up down up-redis up-obs open-obs check-alerts deps demo check-generated loadtest
+.PHONY: help tools generate css lint test test-integration test-e2e cover build release-snapshot up down up-redis up-obs open-obs check-alerts deps demo check-generated check-links loadtest
 
-
+LYCHEE_IMAGE ?= lycheeverse/lychee:0.24.2
 
 help: ## list targets
 	@echo "Relay Make targets:"
@@ -82,6 +82,7 @@ help: ## list targets
 	@echo "  make up-obs            - stack + Prometheus/Grafana/Jaeger (profile observability)"
 	@echo "  make open-obs          - print Grafana/Prometheus/Jaeger URLs"
 	@echo "  make check-alerts      - promtool check rules (via Docker)"
+	@echo "  make check-links       - markdown link check via lychee (Docker)"
 	@echo "  make deps              - start postgres + redis only"
 	@echo "  make demo              - up then run producer once"
 	@echo "  make loadtest          - run k6 via Docker (LOADTEST_SCRIPT=enqueue.js|mixed.js)"
@@ -220,6 +221,20 @@ loadtest: ## run k6 load test in Docker against compose (host ports)
 		$(K6_IMAGE) run \
 		--summary-export=/results/$(basename $(LOADTEST_SCRIPT))-summary.json \
 		/scripts/$(LOADTEST_SCRIPT)
+
+check-links: ## markdown link check via lychee (Docker; offline = repo-relative + file links)
+	MSYS_NO_PATHCONV=1 docker run --rm \
+		-v "$(CURDIR):/input:ro" \
+		-w /input \
+		$(LYCHEE_IMAGE) \
+		--config .lychee.toml \
+		--no-progress \
+		--offline \
+		README.md CONTRIBUTING.md \
+		'docs/**/*.md' \
+		'examples/**/*.md' \
+		'deploy/**/*.md' \
+		'loadtest/**/*.md'
 
 check-generated: generate css ## fail if generated files drift
 	@git diff --exit-code -- \
