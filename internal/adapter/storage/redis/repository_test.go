@@ -40,9 +40,14 @@ func TestRedisRepository_Contract(t *testing.T) {
 
 	require.NoError(t, client.Ping(ctx).Err())
 
+	notifier := storageredis.NewNotifier(ctx, client, "relay")
+	t.Cleanup(notifier.Close)
+
 	storagetest.RunContractTests(t, func(t *testing.T) storagetest.Backend {
 		t.Helper()
 		require.NoError(t, client.FlushDB(ctx).Err())
-		return storageredis.New(client, "relay")
+		repo := storageredis.New(client, "relay")
+		repo.AttachNotifier(notifier)
+		return repo
 	})
 }

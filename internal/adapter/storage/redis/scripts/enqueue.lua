@@ -5,14 +5,17 @@
 -- KEYS[4] = idempotency key (may be empty string → skip)
 -- ARGV: id, queue, type, payload, status, priority, run_at_ms, attempts,
 --       max_attempts, lease_owner, lease_expires_at, idempotency_key,
---       last_error, created_at_ms, updated_at_ms, finished_at, now_ms, ready_score
+--       last_error, created_at_ms, updated_at_ms, finished_at, now_ms, ready_score,
+--       prefix, cancel_requested, cancelled_at
 -- Returns: { created (0|1), job_id }
 
 local idem_key = KEYS[4]
 local id = ARGV[1]
+local queue = ARGV[2]
 local now_ms = tonumber(ARGV[17])
 local run_at_ms = tonumber(ARGV[7])
-local ready_score = tonumber(ARGV[18])
+local score = tonumber(ARGV[18])
+local prefix = ARGV[19]
 
 if idem_key ~= '' then
   local ok = redis.call('SET', idem_key, id, 'NX')
@@ -21,6 +24,8 @@ if idem_key ~= '' then
     return {0, existing}
   end
 end
+
+ensure_queue(prefix, queue, now_ms)
 
 redis.call('HSET', KEYS[1],
   'id', ARGV[1],
@@ -38,11 +43,15 @@ redis.call('HSET', KEYS[1],
   'last_error', ARGV[13],
   'created_at', ARGV[14],
   'updated_at', ARGV[15],
-  'finished_at', ARGV[16]
+  'finished_at', ARGV[16],
+  'cancel_requested', ARGV[20],
+  'cancelled_at', ARGV[21]
 )
+store_idem_redis_key(KEYS[1], idem_key)
 
 if run_at_ms <= now_ms then
-  redis.call('ZADD', KEYS[3], ready_score, id)
+  redis.call('ZADD', KEYS[3], score, id)
+  publish_due(prefix, queue)
 else
   redis.call('ZADD', KEYS[2], run_at_ms, id)
 end

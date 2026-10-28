@@ -283,7 +283,7 @@ func drainResult(resultCh <-chan error, bound time.Duration) {
 	t := time.NewTimer(bound)
 	defer t.Stop()
 	select {
-	case <-resultCh: //nolint:errcheck // draining abandoned or finishing handler
+	case <-resultCh: // draining abandoned or finishing handler
 	case <-t.C:
 	}
 }

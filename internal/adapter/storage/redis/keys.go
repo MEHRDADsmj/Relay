@@ -5,6 +5,11 @@ import "fmt"
 const defaultPrefix = "relay"
 
 // Keys builds Redis key names for a configurable prefix (default "relay").
+//
+// Counter strategy (Phase 2):
+//   - pending = ZCARD(scheduled) + ZCARD(ready)
+//   - running = ZCARD(leased)
+//   - succeeded/dead/cancelled = fields on relay:q:{queue}:counts (maintained in Lua)
 type Keys struct {
 	prefix string
 }
@@ -25,6 +30,11 @@ func (k Keys) Job(id string) string {
 	return fmt.Sprintf("%s:job:%s", k.prefix, id)
 }
 
+// Attempts returns relay:job:{id}:attempts.
+func (k Keys) Attempts(id string) string {
+	return fmt.Sprintf("%s:job:%s:attempts", k.prefix, id)
+}
+
 // Scheduled returns relay:q:{queue}:scheduled.
 func (k Keys) Scheduled(queue string) string {
 	return fmt.Sprintf("%s:q:%s:scheduled", k.prefix, queue)
@@ -40,9 +50,54 @@ func (k Keys) Leased(queue string) string {
 	return fmt.Sprintf("%s:q:%s:leased", k.prefix, queue)
 }
 
+// Counts returns relay:q:{queue}:counts (terminal status counters).
+func (k Keys) Counts(queue string) string {
+	return fmt.Sprintf("%s:q:%s:counts", k.prefix, queue)
+}
+
+// Status returns relay:q:{queue}:status:{status} (terminal status index).
+func (k Keys) Status(queue, status string) string {
+	return fmt.Sprintf("%s:q:%s:status:%s", k.prefix, queue, status)
+}
+
 // Idempotency returns relay:idem:{queue}:{key}.
 func (k Keys) Idempotency(queue, key string) string {
 	return fmt.Sprintf("%s:idem:%s:%s", k.prefix, queue, key)
+}
+
+// Queues returns relay:queues.
+func (k Keys) Queues() string {
+	return fmt.Sprintf("%s:queues", k.prefix)
+}
+
+// Queue returns relay:queue:{queue}.
+func (k Keys) Queue(queue string) string {
+	return fmt.Sprintf("%s:queue:%s", k.prefix, queue)
+}
+
+// LeasedAll returns relay:leased:all.
+func (k Keys) LeasedAll() string {
+	return fmt.Sprintf("%s:leased:all", k.prefix)
+}
+
+// Finished returns relay:finished.
+func (k Keys) Finished() string {
+	return fmt.Sprintf("%s:finished", k.prefix)
+}
+
+// NotifyChannel returns relay:notify:{queue}.
+func (k Keys) NotifyChannel(queue string) string {
+	return fmt.Sprintf("%s:notify:%s", k.prefix, queue)
+}
+
+// NotifyPattern returns relay:notify:* for PSUBSCRIBE.
+func (k Keys) NotifyPattern() string {
+	return fmt.Sprintf("%s:notify:*", k.prefix)
+}
+
+// LeasedAllMember returns {queue}|{id}.
+func LeasedAllMember(queue, id string) string {
+	return queue + "|" + id
 }
 
 // readyScore returns (100 - priority) * 1e13 + run_at_ms.

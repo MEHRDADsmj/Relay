@@ -18,11 +18,18 @@ import (
 var scriptFS embed.FS
 
 var (
-	enqueueScript  = goredis.NewScript(mustReadScript("scripts/enqueue.lua"))
-	claimScript    = goredis.NewScript(mustReadScript("scripts/claim.lua"))
-	extendScript   = goredis.NewScript(mustReadScript("scripts/extend.lua"))
-	completeScript = goredis.NewScript(mustReadScript("scripts/complete.lua"))
-	failScript     = goredis.NewScript(mustReadScript("scripts/fail.lua"))
+	helpersLua = mustReadScript("scripts/helpers.lua")
+
+	enqueueScript  = newScript("scripts/enqueue.lua")
+	claimScript    = newScript("scripts/claim.lua")
+	extendScript   = newScript("scripts/extend.lua")
+	completeScript = newScript("scripts/complete.lua")
+	failScript     = newScript("scripts/fail.lua")
+	releaseScript  = newScript("scripts/release.lua")
+	cancelScript   = newScript("scripts/cancel.lua")
+	retryScript    = newScript("scripts/retry.lua")
+	reapScript     = newScript("scripts/reap.lua")
+	purgeScript    = newScript("scripts/purge.lua")
 )
 
 func mustReadScript(name string) string {
@@ -33,10 +40,15 @@ func mustReadScript(name string) string {
 	return string(b)
 }
 
-// Repository implements app.JobRepository against a single Redis node.
+func newScript(name string) *goredis.Script {
+	return goredis.NewScript(helpersLua + "\n" + mustReadScript(name))
+}
+
+// Repository implements app storage ports against a single Redis node.
 type Repository struct {
-	client *goredis.Client
-	keys   Keys
+	client   *goredis.Client
+	keys     Keys
+	notifier *Notifier
 }
 
 // New wraps an existing client. The caller owns the client lifecycle.
@@ -44,7 +56,12 @@ func New(client *goredis.Client, prefix string) *Repository {
 	return &Repository{client: client, keys: NewKeys(prefix)}
 }
 
-// Open creates a go-redis client from redisURL and returns a repository.
+// AttachNotifier wires a Pub/Sub fan-out for Subscribe.
+func (r *Repository) AttachNotifier(n *Notifier) {
+	r.notifier = n
+}
+
+// Open creates a go-redis client from redisURL, attaches a Notifier, and returns a repository.
 // Call Close when finished.
 func Open(ctx context.Context, redisURL, prefix string) (*Repository, error) {
 	opts, err := goredis.ParseURL(redisURL)
@@ -56,15 +73,26 @@ func Open(ctx context.Context, redisURL, prefix string) (*Repository, error) {
 		_ = client.Close()
 		return nil, fmt.Errorf("redis open: ping: %w", err)
 	}
-	return New(client, prefix), nil
+	repo := New(client, prefix)
+	repo.AttachNotifier(NewNotifier(ctx, client, prefix))
+	return repo, nil
 }
 
-// Close closes the underlying client.
+// Close closes the notifier (if any) and the underlying client.
 func (r *Repository) Close() error {
+	if r.notifier != nil {
+		r.notifier.Close()
+		r.notifier = nil
+	}
 	return r.client.Close()
 }
 
-var _ app.JobRepository = (*Repository)(nil)
+var (
+	_ app.JobRepository         = (*Repository)(nil)
+	_ app.QueueRepository       = (*Repository)(nil)
+	_ app.MaintenanceRepository = (*Repository)(nil)
+	_ app.JobNotifier           = (*Repository)(nil)
+)
 
 // Create implements app.JobRepository.
 //
@@ -104,6 +132,9 @@ func (r *Repository) Create(ctx context.Context, job domain.Job) (domain.Job, bo
 		optionalMsString(job.FinishedAt),
 		strconv.FormatInt(nowMs, 10),
 		strconv.FormatFloat(readyScore(job.Priority, runAtMs), 'f', 0, 64),
+		r.keys.Prefix(),
+		boolToRedis(job.CancelRequested),
+		optionalMsString(job.CancelledAt),
 	).Result()
 	if err != nil {
 		return domain.Job{}, false, err
@@ -161,6 +192,7 @@ func (r *Repository) Claim(ctx context.Context, queue, owner string, limit int, 
 		strconv.Itoa(limit),
 		strconv.FormatInt(leaseMs, 10),
 		r.keys.Prefix(),
+		queue,
 	).Result()
 	if err != nil {
 		return nil, err
@@ -236,7 +268,7 @@ func (r *Repository) Fail(ctx context.Context, id domain.JobID, owner string, er
 		errMsg,
 		string(decision.NextStatus),
 		strconv.FormatInt(runAtMs, 10),
-		"", // empty → Lua recomputes ready score from hash priority
+		"", // unused; Lua recomputes ready score
 		r.keys.Prefix(),
 	).Result()
 	if err != nil {
@@ -248,24 +280,4 @@ func (r *Repository) Fail(ctx context.Context, id domain.JobID, owner string, er
 // Ping implements app.JobRepository.
 func (r *Repository) Ping(ctx context.Context) error {
 	return r.client.Ping(ctx).Err()
-}
-
-func mapScriptJobResult(res any) (domain.Job, error) {
-	arr, err := interfaceSliceToStrings(res)
-	if err != nil || len(arr) < 1 {
-		return domain.Job{}, fmt.Errorf("redis script: bad result %v: %w", res, err)
-	}
-	switch arr[0] {
-	case "NOT_FOUND":
-		return domain.Job{}, domain.ErrNotFound
-	case "LEASE_LOST":
-		return domain.Job{}, domain.ErrLeaseLost
-	case "OK":
-		if len(arr) < 2 {
-			return domain.Job{}, fmt.Errorf("redis script: OK without hash")
-		}
-		return hashToJob(arr[1:])
-	default:
-		return domain.Job{}, fmt.Errorf("redis script: unknown code %q", arr[0])
-	}
 }

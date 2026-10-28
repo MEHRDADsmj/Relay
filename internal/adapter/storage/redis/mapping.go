@@ -1,6 +1,7 @@
 package redis
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -45,6 +46,17 @@ func parseOptionalMs(s string) (*time.Time, error) {
 		return nil, err
 	}
 	return &t, nil
+}
+
+func boolFromRedis(s string) bool {
+	return s == "1" || s == "true"
+}
+
+func boolToRedis(v bool) string {
+	if v {
+		return "1"
+	}
+	return "0"
 }
 
 func hashToJob(flat []string) (domain.Job, error) {
@@ -95,6 +107,10 @@ func mapToJob(m map[string]string) (domain.Job, error) {
 	if err != nil {
 		return domain.Job{}, fmt.Errorf("redis job finished_at: %w", err)
 	}
+	cancelledAt, err := parseOptionalMs(m["cancelled_at"])
+	if err != nil {
+		return domain.Job{}, fmt.Errorf("redis job cancelled_at: %w", err)
+	}
 
 	payload := []byte(m["payload"])
 	if len(payload) == 0 {
@@ -102,23 +118,59 @@ func mapToJob(m map[string]string) (domain.Job, error) {
 	}
 
 	return domain.Job{
-		ID:             id,
-		Queue:          m["queue"],
-		Type:           m["type"],
-		Payload:        payload,
-		Status:         domain.Status(m["status"]),
-		Priority:       priority,
-		RunAt:          runAt,
-		Attempts:       attempts,
-		MaxAttempts:    maxAttempts,
-		LeaseOwner:     m["lease_owner"],
-		LeaseExpiresAt: leaseExp,
-		IdempotencyKey: m["idempotency_key"],
-		LastError:      m["last_error"],
-		CreatedAt:      createdAt,
-		UpdatedAt:      updatedAt,
-		FinishedAt:     finishedAt,
+		ID:              id,
+		Queue:           m["queue"],
+		Type:            m["type"],
+		Payload:         payload,
+		Status:          domain.Status(m["status"]),
+		Priority:        priority,
+		RunAt:           runAt,
+		Attempts:        attempts,
+		MaxAttempts:     maxAttempts,
+		LeaseOwner:      m["lease_owner"],
+		LeaseExpiresAt:  leaseExp,
+		IdempotencyKey:  m["idempotency_key"],
+		LastError:       m["last_error"],
+		CreatedAt:       createdAt,
+		UpdatedAt:       updatedAt,
+		FinishedAt:      finishedAt,
+		CancelRequested: boolFromRedis(m["cancel_requested"]),
+		CancelledAt:     cancelledAt,
 	}, nil
+}
+
+type attemptJSON struct {
+	JobID      string `json:"job_id"`
+	Number     int    `json:"number"`
+	WorkerID   string `json:"worker_id"`
+	StartedAt  int64  `json:"started_at"`
+	FinishedAt *int64 `json:"finished_at"`
+	Outcome    string `json:"outcome"`
+	Error      string `json:"error"`
+}
+
+func decodeAttempt(raw string) (domain.Attempt, error) {
+	var a attemptJSON
+	if err := json.Unmarshal([]byte(raw), &a); err != nil {
+		return domain.Attempt{}, err
+	}
+	id, err := uuid.Parse(a.JobID)
+	if err != nil {
+		return domain.Attempt{}, err
+	}
+	out := domain.Attempt{
+		JobID:     id,
+		Number:    a.Number,
+		WorkerID:  a.WorkerID,
+		StartedAt: time.UnixMilli(a.StartedAt).UTC(),
+		Outcome:   domain.AttemptOutcome(a.Outcome),
+		Error:     a.Error,
+	}
+	if a.FinishedAt != nil {
+		t := time.UnixMilli(*a.FinishedAt).UTC()
+		out.FinishedAt = &t
+	}
+	return out, nil
 }
 
 func interfaceSliceToStrings(v any) ([]string, error) {
@@ -138,4 +190,43 @@ func interfaceSliceToStrings(v any) ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+func mapScriptJobResult(res any) (domain.Job, error) {
+	arr, err := interfaceSliceToStrings(res)
+	if err != nil || len(arr) < 1 {
+		return domain.Job{}, fmt.Errorf("redis script: bad result %v: %w", res, err)
+	}
+	switch arr[0] {
+	case "NOT_FOUND":
+		return domain.Job{}, domain.ErrNotFound
+	case "LEASE_LOST":
+		return domain.Job{}, domain.ErrLeaseLost
+	case "INVALID":
+		return domain.Job{}, domain.ErrInvalidTransition
+	case "OK":
+		if len(arr) < 2 {
+			return domain.Job{}, fmt.Errorf("redis script: OK without hash")
+		}
+		return hashToJob(arr[1:])
+	default:
+		return domain.Job{}, fmt.Errorf("redis script: unknown code %q", arr[0])
+	}
+}
+
+func mapToQueue(name string, m map[string]string) (domain.Queue, error) {
+	created, err := parseMs(m["created_at"])
+	if err != nil {
+		return domain.Queue{}, err
+	}
+	updated, err := parseMs(m["updated_at"])
+	if err != nil {
+		return domain.Queue{}, err
+	}
+	return domain.Queue{
+		Name:      name,
+		Paused:    boolFromRedis(m["paused"]),
+		CreatedAt: created,
+		UpdatedAt: updated,
+	}, nil
 }
