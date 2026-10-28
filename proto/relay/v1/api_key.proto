@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package relay.v1;
+
+option go_package = "github.com/MEHRDADsmj/relay/gen/relay/v1;relayv1";
+
+import "google/protobuf/timestamp.proto";
+import "relay/v1/types.proto";
+
+// APIKeyService manages API keys (REST parity).
+service APIKeyService {
+  // CreateAPIKey creates a key and returns the secret once.
+  rpc CreateAPIKey(CreateAPIKeyRequest) returns (CreateAPIKeyResponse);
+  // ListAPIKeys lists keys without secrets.
+  rpc ListAPIKeys(ListAPIKeysRequest) returns (ListAPIKeysResponse);
+  // RevokeAPIKey revokes a key by ID.
+  rpc RevokeAPIKey(RevokeAPIKeyRequest) returns (RevokeAPIKeyResponse);
+}
+
+message CreateAPIKeyRequest {
+  string name = 1;
+  repeated Scope scopes = 2;
+  optional google.protobuf.Timestamp expires_at = 3;
+}
+
+message CreateAPIKeyResponse {
+  APIKey key = 1;
+  string secret = 2;
+}
+
+message ListAPIKeysRequest {}
+
+message ListAPIKeysResponse {
+  repeated APIKey keys = 1;
+}
+
+message RevokeAPIKeyRequest {
+  string id = 1;
+}
+
+message RevokeAPIKeyResponse {
+  APIKey key = 1;
+}

@@ -1,0 +1,132 @@
+syntax = "proto3";
+
+package relay.v1;
+
+option go_package = "github.com/MEHRDADsmj/relay/gen/relay/v1;relayv1";
+
+import "google/protobuf/timestamp.proto";
+import "relay/v1/types.proto";
+
+// JobService provides job enqueue, lease, and lifecycle RPCs (REST parity).
+service JobService {
+  // Enqueue creates a job or returns an idempotent replay.
+  rpc Enqueue(EnqueueRequest) returns (EnqueueResponse);
+  // GetJob returns a job by ID.
+  rpc GetJob(GetJobRequest) returns (GetJobResponse);
+  // Lease claims jobs from a queue (optional long-poll via wait).
+  rpc Lease(LeaseRequest) returns (LeaseResponse);
+  // Heartbeat extends a job lease.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  // Complete marks a job succeeded.
+  rpc Complete(CompleteRequest) returns (CompleteResponse);
+  // Fail reports a failure (optional permanent → dead).
+  rpc Fail(FailRequest) returns (FailResponse);
+  // Release voluntarily returns a leased job to pending.
+  rpc Release(ReleaseRequest) returns (ReleaseResponse);
+  // Cancel cancels a pending job or requests cancel on a running job.
+  rpc Cancel(CancelRequest) returns (CancelResponse);
+  // Retry requeues a dead or cancelled job.
+  rpc Retry(RetryRequest) returns (RetryResponse);
+  // ListAttempts returns attempt history for a job.
+  rpc ListAttempts(ListAttemptsRequest) returns (ListAttemptsResponse);
+}
+
+message EnqueueRequest {
+  string queue = 1;
+  string type = 2;
+  bytes payload = 3;
+  optional int32 priority = 4;
+  optional google.protobuf.Timestamp run_at = 5;
+  optional int32 max_attempts = 6;
+  string idempotency_key = 7;
+}
+
+message EnqueueResponse {
+  Job job = 1;
+  bool created = 2;
+}
+
+message GetJobRequest {
+  string id = 1;
+}
+
+message GetJobResponse {
+  Job job = 1;
+}
+
+message LeaseRequest {
+  string queue = 1;
+  string worker_id = 2;
+  optional int32 max_jobs = 3;
+  // Lease duration in seconds (default 30). Prefer Duration in future; seconds match REST.
+  optional int32 lease_seconds = 4;
+  // Long-poll wait in seconds (0..30). Honored up to the RPC deadline.
+  optional int32 wait_seconds = 5;
+}
+
+message LeaseResponse {
+  repeated Job jobs = 1;
+}
+
+message HeartbeatRequest {
+  string id = 1;
+  string worker_id = 2;
+  optional int32 lease_seconds = 3;
+}
+
+message HeartbeatResponse {
+  Job job = 1;
+}
+
+message CompleteRequest {
+  string id = 1;
+  string worker_id = 2;
+}
+
+message CompleteResponse {
+  Job job = 1;
+}
+
+message FailRequest {
+  string id = 1;
+  string worker_id = 2;
+  string error = 3;
+  bool permanent = 4;
+}
+
+message FailResponse {
+  Job job = 1;
+}
+
+message ReleaseRequest {
+  string id = 1;
+  string worker_id = 2;
+}
+
+message ReleaseResponse {
+  Job job = 1;
+}
+
+message CancelRequest {
+  string id = 1;
+}
+
+message CancelResponse {
+  Job job = 1;
+}
+
+message RetryRequest {
+  string id = 1;
+}
+
+message RetryResponse {
+  Job job = 1;
+}
+
+message ListAttemptsRequest {
+  string id = 1;
+}
+
+message ListAttemptsResponse {
+  repeated Attempt attempts = 1;
+}

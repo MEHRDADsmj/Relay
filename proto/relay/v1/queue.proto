@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package relay.v1;
+
+option go_package = "github.com/MEHRDADsmj/relay/gen/relay/v1;relayv1";
+
+import "relay/v1/types.proto";
+
+// QueueService provides queue admin RPCs (REST parity).
+service QueueService {
+  // ListQueues returns all registered queues.
+  rpc ListQueues(ListQueuesRequest) returns (ListQueuesResponse);
+  // GetQueueStats returns aggregate counts for a queue.
+  rpc GetQueueStats(GetQueueStatsRequest) returns (GetQueueStatsResponse);
+  // PauseQueue pauses a queue.
+  rpc PauseQueue(PauseQueueRequest) returns (PauseQueueResponse);
+  // ResumeQueue resumes a paused queue.
+  rpc ResumeQueue(ResumeQueueRequest) returns (ResumeQueueResponse);
+  // ListQueueJobs returns a keyset page of jobs filtered by status.
+  rpc ListQueueJobs(ListQueueJobsRequest) returns (ListQueueJobsResponse);
+  // RetryDeadJobs bulk-retries dead jobs in a queue.
+  rpc RetryDeadJobs(RetryDeadJobsRequest) returns (RetryDeadJobsResponse);
+}
+
+message ListQueuesRequest {}
+
+message ListQueuesResponse {
+  repeated Queue queues = 1;
+}
+
+message GetQueueStatsRequest {
+  string queue = 1;
+}
+
+message GetQueueStatsResponse {
+  QueueStats stats = 1;
+}
+
+message PauseQueueRequest {
+  string queue = 1;
+}
+
+message PauseQueueResponse {
+  Queue queue = 1;
+}
+
+message ResumeQueueRequest {
+  string queue = 1;
+}
+
+message ResumeQueueResponse {
+  Queue queue = 1;
+}
+
+message ListQueueJobsRequest {
+  string queue = 1;
+  JobStatus status = 2;
+  optional int32 limit = 3;
+  string cursor = 4;
+}
+
+message ListQueueJobsResponse {
+  repeated Job jobs = 1;
+  string next_cursor = 2;
+}
+
+message RetryDeadJobsRequest {
+  string queue = 1;
+  optional int32 limit = 2;
+}
+
+message RetryDeadJobsResponse {
+  int32 retried = 1;
+}

@@ -82,6 +82,17 @@ linters:
           deny:
             - pkg: github.com/MEHRDADsmj/relay/internal/adapter/storage
               desc: http adapter must not import storage adapters
+        grpc-adapter:
+          list-mode: lax
+          files:
+            - "**/internal/adapter/grpc/*.go"
+            - "**/internal/adapter/grpc/**/*.go"
+            - "!**/*_test.go"
+          deny:
+            - pkg: github.com/MEHRDADsmj/relay/internal/adapter/storage
+              desc: grpc adapter must not import storage adapters
+            - pkg: github.com/MEHRDADsmj/relay/internal/adapter/http
+              desc: grpc adapter must not import http adapter
         postgres-adapter:
           list-mode: lax
           files:
@@ -142,6 +153,7 @@ linters:
     paths:
       - internal/adapter/storage/postgres/sqlcgen
       - internal/adapter/http/oapi
+      - gen
 
 formatters:
   enable:
@@ -156,3 +168,4 @@ formatters:
     paths:
       - internal/adapter/storage/postgres/sqlcgen
       - internal/adapter/http/oapi
+      - gen

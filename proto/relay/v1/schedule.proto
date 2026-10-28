@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+package relay.v1;
+
+option go_package = "github.com/MEHRDADsmj/relay/gen/relay/v1;relayv1";
+
+import "google/protobuf/timestamp.proto";
+import "relay/v1/types.proto";
+
+// ScheduleService provides cron schedule CRUD and control RPCs (REST parity).
+service ScheduleService {
+  // CreateSchedule creates a cron schedule.
+  rpc CreateSchedule(CreateScheduleRequest) returns (CreateScheduleResponse);
+  // ListSchedules returns a keyset page of schedules.
+  rpc ListSchedules(ListSchedulesRequest) returns (ListSchedulesResponse);
+  // GetSchedule returns a schedule by UUID or unique name.
+  rpc GetSchedule(GetScheduleRequest) returns (GetScheduleResponse);
+  // UpdateSchedule applies a partial update with optimistic concurrency via expected_updated_at.
+  rpc UpdateSchedule(UpdateScheduleRequest) returns (UpdateScheduleResponse);
+  // DeleteSchedule removes a schedule.
+  rpc DeleteSchedule(DeleteScheduleRequest) returns (DeleteScheduleResponse);
+  // EnableSchedule enables a schedule.
+  rpc EnableSchedule(EnableScheduleRequest) returns (EnableScheduleResponse);
+  // DisableSchedule disables a schedule.
+  rpc DisableSchedule(DisableScheduleRequest) returns (DisableScheduleResponse);
+  // TriggerSchedule enqueues a job for the schedule immediately.
+  rpc TriggerSchedule(TriggerScheduleRequest) returns (TriggerScheduleResponse);
+}
+
+message CreateScheduleRequest {
+  string name = 1;
+  string cron = 2;
+  string timezone = 3;
+  string queue = 4;
+  string type = 5;
+  bytes payload = 6;
+  optional int32 priority = 7;
+  optional int32 max_attempts = 8;
+  optional bool enabled = 9;
+}
+
+message CreateScheduleResponse {
+  Schedule schedule = 1;
+}
+
+message ListSchedulesRequest {
+  optional int32 limit = 1;
+  string cursor = 2;
+}
+
+message ListSchedulesResponse {
+  repeated Schedule schedules = 1;
+  string next_cursor = 2;
+}
+
+message GetScheduleRequest {
+  // UUID or unique name.
+  string id_or_name = 1;
+}
+
+message GetScheduleResponse {
+  Schedule schedule = 1;
+}
+
+message UpdateScheduleRequest {
+  string id = 1;
+  // Required: current updated_at (RFC3339Nano semantics via Timestamp).
+  google.protobuf.Timestamp expected_updated_at = 2;
+  optional string cron = 3;
+  optional string timezone = 4;
+  optional string queue = 5;
+  optional string type = 6;
+  // When set_payload is true, payload replaces the stored value (including empty).
+  bool set_payload = 7;
+  bytes payload = 8;
+  optional int32 priority = 9;
+  optional int32 max_attempts = 10;
+  optional bool enabled = 11;
+}
+
+message UpdateScheduleResponse {
+  Schedule schedule = 1;
+}
+
+message DeleteScheduleRequest {
+  string id = 1;
+}
+
+message DeleteScheduleResponse {}
+
+message EnableScheduleRequest {
+  string id = 1;
+}
+
+message EnableScheduleResponse {
+  Schedule schedule = 1;
+}
+
+message DisableScheduleRequest {
+  string id = 1;
+}
+
+message DisableScheduleResponse {
+  Schedule schedule = 1;
+}
+
+message TriggerScheduleRequest {
+  string id = 1;
+}
+
+message TriggerScheduleResponse {
+  Job job = 1;
+}

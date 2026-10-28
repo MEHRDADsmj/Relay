@@ -25,7 +25,7 @@ help: ## list targets
 	@echo "Relay Make targets:"
 	@echo "  make help              - list targets (default)"
 	@echo "  make tools             - download modules; verify golangci-lint"
-	@echo "  make generate          - run sqlc + oapi-codegen (no-op until sources exist)"
+	@echo "  make generate          - run sqlc + oapi-codegen + buf"
 	@echo "  make lint              - run golangci-lint"
 	@echo "  make test              - unit tests with -race"
 	@echo "  make test-integration  - integration tests (-tags=integration)"
@@ -50,7 +50,7 @@ tools: ## go mod download + verify golangci-lint
 	fi
 	$(GOLANGCI_LINT) version
 
-generate: ## sqlc + oapi-codegen (skips when sources are missing)
+generate: ## sqlc + oapi-codegen + buf (skips when sources are missing)
 	@if ls internal/adapter/storage/postgres/queries/*.sql >/dev/null 2>&1; then \
 		$(GO) tool sqlc generate; \
 	else \
@@ -60,6 +60,11 @@ generate: ## sqlc + oapi-codegen (skips when sources are missing)
 		$(GO) tool oapi-codegen -config oapi-codegen.yaml api/openapi.yaml; \
 	else \
 		echo "generate: skipping oapi-codegen (api/openapi.yaml missing)"; \
+	fi
+	@if [ -f buf.yaml ] && [ -d proto/relay/v1 ]; then \
+		$(GO) tool buf generate; \
+	else \
+		echo "generate: skipping buf (proto sources missing)"; \
 	fi
 
 lint: ## golangci-lint run ./...
@@ -101,7 +106,7 @@ demo: up ## run demo producer
 	COMPOSE_GOPROXY=$(COMPOSE_GOPROXY) docker compose --profile demo run --rm --no-deps example-producer
 
 check-generated: generate ## fail if generated files drift
-	@git diff --exit-code -- internal/adapter/storage/postgres/sqlcgen internal/adapter/http/oapi || ( \
+	@git diff --exit-code -- internal/adapter/storage/postgres/sqlcgen internal/adapter/http/oapi gen/relay/v1 || ( \
 		echo "generated files are dirty; run make generate and commit"; \
 		exit 1; \
 	)

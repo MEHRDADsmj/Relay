@@ -1,0 +1,122 @@
+syntax = "proto3";
+
+package relay.v1;
+
+option go_package = "github.com/MEHRDADsmj/relay/gen/relay/v1;relayv1";
+
+import "google/protobuf/timestamp.proto";
+
+// JobStatus mirrors REST JobStatus.
+enum JobStatus {
+  JOB_STATUS_UNSPECIFIED = 0;
+  JOB_STATUS_PENDING = 1;
+  JOB_STATUS_RUNNING = 2;
+  JOB_STATUS_SUCCEEDED = 3;
+  JOB_STATUS_DEAD = 4;
+  JOB_STATUS_CANCELLED = 5;
+}
+
+// AttemptOutcome mirrors REST Attempt.outcome.
+enum AttemptOutcome {
+  ATTEMPT_OUTCOME_UNSPECIFIED = 0;
+  ATTEMPT_OUTCOME_RUNNING = 1;
+  ATTEMPT_OUTCOME_SUCCEEDED = 2;
+  ATTEMPT_OUTCOME_FAILED = 3;
+  ATTEMPT_OUTCOME_EXPIRED = 4;
+  ATTEMPT_OUTCOME_RELEASED = 5;
+  ATTEMPT_OUTCOME_CANCELLED = 6;
+}
+
+// Scope mirrors REST API key scopes.
+enum Scope {
+  SCOPE_UNSPECIFIED = 0;
+  SCOPE_PRODUCER = 1;
+  SCOPE_WORKER = 2;
+  SCOPE_ADMIN = 3;
+}
+
+// Job is the job resource.
+message Job {
+  string id = 1;
+  string queue = 2;
+  string type = 3;
+  // Opaque JSON payload bytes (lossless; not google.protobuf.Struct).
+  bytes payload = 4;
+  JobStatus status = 5;
+  int32 priority = 6;
+  google.protobuf.Timestamp run_at = 7;
+  int32 attempts = 8;
+  int32 max_attempts = 9;
+  string lease_owner = 10;
+  google.protobuf.Timestamp lease_expires_at = 11;
+  string idempotency_key = 12;
+  string last_error = 13;
+  bool cancel_requested = 14;
+  google.protobuf.Timestamp cancelled_at = 15;
+  google.protobuf.Timestamp created_at = 16;
+  google.protobuf.Timestamp updated_at = 17;
+  google.protobuf.Timestamp finished_at = 18;
+}
+
+// Attempt is one execution attempt of a job.
+message Attempt {
+  string job_id = 1;
+  int32 number = 2;
+  string worker_id = 3;
+  google.protobuf.Timestamp started_at = 4;
+  google.protobuf.Timestamp finished_at = 5;
+  AttemptOutcome outcome = 6;
+  string error = 7;
+}
+
+// Queue is a named work queue.
+message Queue {
+  string name = 1;
+  bool paused = 2;
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+// QueueStats aggregates job counts for a queue.
+message QueueStats {
+  string queue = 1;
+  bool paused = 2;
+  int64 pending = 3;
+  int64 scheduled = 4;
+  int64 running = 5;
+  int64 succeeded = 6;
+  int64 dead = 7;
+  int64 cancelled = 8;
+  int64 oldest_pending_age_seconds = 9;
+}
+
+// Schedule is a cron schedule that enqueues jobs.
+message Schedule {
+  string id = 1;
+  string name = 2;
+  string cron = 3;
+  string timezone = 4;
+  string queue = 5;
+  string type = 6;
+  bytes payload = 7;
+  int32 priority = 8;
+  int32 max_attempts = 9;
+  bool enabled = 10;
+  google.protobuf.Timestamp next_run_at = 11;
+  google.protobuf.Timestamp last_run_at = 12;
+  string last_job_id = 13;
+  google.protobuf.Timestamp created_at = 14;
+  google.protobuf.Timestamp updated_at = 15;
+}
+
+// APIKey is a stored API key (secret never included).
+message APIKey {
+  string id = 1;
+  string name = 2;
+  string prefix = 3;
+  repeated Scope scopes = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp last_used_at = 6;
+  google.protobuf.Timestamp expires_at = 7;
+  google.protobuf.Timestamp revoked_at = 8;
+}
