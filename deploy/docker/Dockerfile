@@ -4,8 +4,10 @@ FROM golang:1.26-bookworm AS build
 WORKDIR /src
 
 ARG CMD=relay-server
-# proxy.golang.org returns 403 on some networks and Go does not fall through on 403.
-ENV GOPROXY=https://goproxy.io,direct
+# Default matches public Go module proxy. Override when blocked, e.g.:
+#   docker compose build --build-arg GOPROXY=https://goproxy.io,direct
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
 
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
