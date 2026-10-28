@@ -59,10 +59,10 @@ func TestClient_APIError_NotFoundAndLeaseLost(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/jobs/missing", func(w http.ResponseWriter, _ *http.Request) {
-		writeProblem(w, http.StatusNotFound, "Not Found", "resource not found")
+		writeProblem(w, http.StatusNotFound, "Not Found", "resource not found", "")
 	})
 	mux.HandleFunc("/v1/jobs/lost", func(w http.ResponseWriter, _ *http.Request) {
-		writeProblem(w, http.StatusConflict, "Conflict", "lease lost or conflict")
+		writeProblem(w, http.StatusConflict, "Conflict", "lease lost or conflict", "https://relay.dev/problems/lease-lost")
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
