@@ -48,28 +48,30 @@ curl -sS "http://localhost:7420/v1/queues/default/jobs?status=pending"
 ## Lease loop (worker-shaped)
 
 ```bash
+WORKER_ID=curl-worker-1
+
 # Claim up to 5 jobs; wait up to 20s if the queue is empty
 curl -sS -X POST http://localhost:7420/v1/queues/default/leases \
   -H 'Content-Type: application/json' \
-  -d '{"max_jobs": 5, "wait_seconds": 20}'
+  -d "{\"worker_id\": \"$WORKER_ID\", \"max_jobs\": 5, \"wait_seconds\": 20}"
 ```
 
-For each leased job (use `id` + `lease_token` from the response):
+For each leased job (use its `id` as `JOB_ID`; keep the same `worker_id`):
 
 ```bash
 curl -sS -X POST "http://localhost:7420/v1/jobs/$JOB_ID/heartbeat" \
   -H 'Content-Type: application/json' \
-  -d "{\"lease_token\": \"$LEASE_TOKEN\"}"
+  -d "{\"worker_id\": \"$WORKER_ID\"}"
 
 # Success
 curl -sS -X POST "http://localhost:7420/v1/jobs/$JOB_ID/complete" \
   -H 'Content-Type: application/json' \
-  -d "{\"lease_token\": \"$LEASE_TOKEN\"}"
+  -d "{\"worker_id\": \"$WORKER_ID\"}"
 
 # Or failure (retry / dead per policy)
 curl -sS -X POST "http://localhost:7420/v1/jobs/$JOB_ID/fail" \
   -H 'Content-Type: application/json' \
-  -d "{\"lease_token\": \"$LEASE_TOKEN\", \"error\": \"smtp timeout\"}"
+  -d "{\"worker_id\": \"$WORKER_ID\", \"error\": \"smtp timeout\"}"
 ```
 
 ## Pause, resume, dead-letter retry
