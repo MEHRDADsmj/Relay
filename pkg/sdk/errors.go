@@ -49,9 +49,9 @@ func (e *APIError) Is(target error) bool {
 	}
 	switch target {
 	case ErrLeaseLost:
-		return e.StatusCode == 409 && e.Type != problemTypeInvalidTransition
+		return e.Type == problemTypeLeaseLost
 	case ErrInvalidTransition:
-		return e.StatusCode == 409 && e.Type == problemTypeInvalidTransition
+		return e.Type == problemTypeInvalidTransition
 	case ErrNotFound:
 		return e.StatusCode == 404
 	default:

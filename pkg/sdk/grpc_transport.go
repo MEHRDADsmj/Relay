@@ -473,10 +473,6 @@ func mapGRPCError(err error) error {
 			}
 		}
 	}
-	// Default lease-lost typing for FailedPrecondition without details.
-	if st.Code() == codes.FailedPrecondition && ae.Type == "" {
-		ae.Type = problemTypeLeaseLost
-	}
 	return ae
 }
 
