@@ -52,19 +52,40 @@ func testRouter(t *testing.T, apiKey string) (http.Handler, *app.JobService) {
 	id1 := uuid.Must(uuid.Parse("01900000-0000-7000-8000-000000000001"))
 	id2 := uuid.Must(uuid.Parse("01900000-0000-7000-8000-000000000002"))
 	repo := memory.New()
+	clock := fixedClock{t: now}
 	svc := app.NewJobService(
 		repo,
-		fixedClock{t: now},
+		clock,
 		&seqIDs{ids: []domain.JobID{id1, id2}},
 		app.FixedDelayRetryPolicy{Delay: time.Second},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		nil,
+		repo, // memory notifier for long-poll
 	)
-	h := relayhttp.NewRouter(svc, relayhttp.Options{
+	queues := app.NewQueueService(repo, repo, clock)
+	h := relayhttp.NewRouter(svc, queues, relayhttp.Options{
 		APIKey: apiKey,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	return h, svc
+}
+
+func testRouterAt(t *testing.T, now time.Time, ids ...domain.JobID) (http.Handler, *app.JobService, *memory.Repository) {
+	t.Helper()
+	repo := memory.New()
+	clock := fixedClock{t: now}
+	svc := app.NewJobService(
+		repo,
+		clock,
+		&seqIDs{ids: ids},
+		app.FixedDelayRetryPolicy{Delay: time.Second},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		repo,
+	)
+	queues := app.NewQueueService(repo, repo, clock)
+	h := relayhttp.NewRouter(svc, queues, relayhttp.Options{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	return h, svc, repo
 }
 
 func doJSON(t *testing.T, h http.Handler, method, path string, body any, headers map[string]string) httpResult {
@@ -273,6 +294,7 @@ func TestErrors_ValidationNotFoundLeaseLost(t *testing.T) {
 	require.Equal(t, http.StatusConflict, res.Status)
 	decodeBody(t, res, &problem)
 	require.Equal(t, float64(409), problem["status"])
+	require.Equal(t, "https://relay.dev/problems/lease-lost", problem["type"])
 }
 
 func TestErrors_InvalidJSONAndBadUUID(t *testing.T) {
@@ -296,8 +318,10 @@ func TestErrors_BodyTooLarge(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
 	repo := memory.New()
-	svc := app.NewJobService(repo, fixedClock{t: now}, &seqIDs{}, app.FixedDelayRetryPolicy{Delay: time.Second}, nil, nil)
-	h := relayhttp.NewRouter(svc, relayhttp.Options{
+	clock := fixedClock{t: now}
+	svc := app.NewJobService(repo, clock, &seqIDs{}, app.FixedDelayRetryPolicy{Delay: time.Second}, nil, nil)
+	queues := app.NewQueueService(repo, repo, clock)
+	h := relayhttp.NewRouter(svc, queues, relayhttp.Options{
 		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 		MaxBodyBytes: 64,
 	})
@@ -372,15 +396,18 @@ func TestRequestID_PropagatesClientValue(t *testing.T) {
 
 func TestReadyz_Unavailable(t *testing.T) {
 	t.Parallel()
+	clock := fixedClock{t: time.Now().UTC()}
+	repo := memory.New()
 	svc := app.NewJobService(
 		failingPingRepo{},
-		fixedClock{t: time.Now().UTC()},
+		clock,
 		&seqIDs{},
 		app.FixedDelayRetryPolicy{Delay: time.Second},
 		nil,
 		nil,
 	)
-	h := relayhttp.NewRouter(svc, relayhttp.Options{
+	queues := app.NewQueueService(repo, repo, clock)
+	h := relayhttp.NewRouter(svc, queues, relayhttp.Options{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	res := doJSON(t, h, http.MethodGet, "/readyz", nil, nil)
@@ -390,15 +417,19 @@ func TestReadyz_Unavailable(t *testing.T) {
 
 func TestErrors_InternalServerError(t *testing.T) {
 	t.Parallel()
+	now := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
+	clock := fixedClock{t: now}
+	mem := memory.New()
 	svc := app.NewJobService(
 		errorCreateRepo{err: errBoom},
-		fixedClock{t: time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)},
+		clock,
 		&seqIDs{ids: []domain.JobID{uuid.Must(uuid.Parse("01900000-0000-7000-8000-000000000010"))}},
 		app.FixedDelayRetryPolicy{Delay: time.Second},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		nil,
 	)
-	h := relayhttp.NewRouter(svc, relayhttp.Options{
+	queues := app.NewQueueService(mem, mem, clock)
+	h := relayhttp.NewRouter(svc, queues, relayhttp.Options{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	res := doJSON(t, h, http.MethodPost, "/v1/jobs", map[string]any{
