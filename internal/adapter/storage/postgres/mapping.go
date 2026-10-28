@@ -1,8 +1,11 @@
 package postgres
 
 import (
+	"fmt"
 	"math"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/MEHRDADsmj/relay/internal/adapter/storage/postgres/sqlcgen"
 	"github.com/MEHRDADsmj/relay/internal/domain"
@@ -50,6 +53,106 @@ func toQueue(q sqlcgen.Queue) domain.Queue {
 		CreatedAt: q.CreatedAt.UTC(),
 		UpdatedAt: q.UpdatedAt.UTC(),
 	}
+}
+
+func toDomainSchedule(s sqlcgen.Schedule) domain.Schedule {
+	return domain.Schedule{
+		ID:          s.ID,
+		Name:        s.Name,
+		Cron:        s.Cron,
+		Timezone:    s.Timezone,
+		Queue:       s.Queue,
+		JobType:     s.JobType,
+		Payload:     append([]byte(nil), s.Payload...),
+		Priority:    int(s.Priority),
+		MaxAttempts: int(s.MaxAttempts),
+		Enabled:     s.Enabled,
+		NextRunAt:   s.NextRunAt.UTC(),
+		LastRunAt:   utcPtr(s.LastRunAt),
+		LastJobID:   s.LastJobID,
+		CreatedAt:   s.CreatedAt.UTC(),
+		UpdatedAt:   s.UpdatedAt.UTC(),
+	}
+}
+
+func toCreateScheduleParams(s domain.Schedule) sqlcgen.CreateScheduleParams {
+	return sqlcgen.CreateScheduleParams{
+		ID:          s.ID,
+		Name:        s.Name,
+		Cron:        s.Cron,
+		Timezone:    s.Timezone,
+		Queue:       s.Queue,
+		JobType:     s.JobType,
+		Payload:     s.Payload,
+		Priority:    int16(s.Priority),    //nolint:gosec // G115: domain-bounded
+		MaxAttempts: int32(s.MaxAttempts), //nolint:gosec // G115: domain-bounded
+		Enabled:     s.Enabled,
+		NextRunAt:   s.NextRunAt.UTC(),
+		LastRunAt:   utcPtr(s.LastRunAt),
+		LastJobID:   s.LastJobID,
+		CreatedAt:   s.CreatedAt.UTC(),
+		UpdatedAt:   s.UpdatedAt.UTC(),
+	}
+}
+
+func toUpdateScheduleParams(s domain.Schedule, expectedUpdatedAt time.Time) sqlcgen.UpdateScheduleParams {
+	return sqlcgen.UpdateScheduleParams{
+		Name:              s.Name,
+		Cron:              s.Cron,
+		Timezone:          s.Timezone,
+		Queue:             s.Queue,
+		JobType:           s.JobType,
+		Payload:           s.Payload,
+		Priority:          int16(s.Priority),    //nolint:gosec // G115: domain-bounded
+		MaxAttempts:       int32(s.MaxAttempts), //nolint:gosec // G115: domain-bounded
+		Enabled:           s.Enabled,
+		NextRunAt:         s.NextRunAt.UTC(),
+		LastRunAt:         utcPtr(s.LastRunAt),
+		LastJobID:         s.LastJobID,
+		UpdatedAt:         s.UpdatedAt.UTC(),
+		ID:                s.ID,
+		ExpectedUpdatedAt: expectedUpdatedAt.UTC(),
+	}
+}
+
+func toDomainAPIKey(k sqlcgen.ApiKey) domain.APIKey {
+	scopes := make([]domain.Scope, len(k.Scopes))
+	for i, s := range k.Scopes {
+		scopes[i] = domain.Scope(s)
+	}
+	return domain.APIKey{
+		ID:         k.ID.String(),
+		Name:       k.Name,
+		Prefix:     k.Prefix,
+		Hash:       append([]byte(nil), k.Hash...),
+		Scopes:     scopes,
+		CreatedAt:  k.CreatedAt.UTC(),
+		LastUsedAt: utcPtr(k.LastUsedAt),
+		ExpiresAt:  utcPtr(k.ExpiresAt),
+		RevokedAt:  utcPtr(k.RevokedAt),
+	}
+}
+
+func toCreateAPIKeyParams(k domain.APIKey) (sqlcgen.CreateAPIKeyParams, error) {
+	id, err := uuid.Parse(k.ID)
+	if err != nil || id == uuid.Nil {
+		return sqlcgen.CreateAPIKeyParams{}, fmt.Errorf("postgres api key id: invalid")
+	}
+	scopes := make([]string, len(k.Scopes))
+	for i, s := range k.Scopes {
+		scopes[i] = string(s)
+	}
+	return sqlcgen.CreateAPIKeyParams{
+		ID:         id,
+		Name:       k.Name,
+		Prefix:     k.Prefix,
+		Hash:       k.Hash,
+		Scopes:     scopes,
+		CreatedAt:  k.CreatedAt.UTC(),
+		LastUsedAt: utcPtr(k.LastUsedAt),
+		ExpiresAt:  utcPtr(k.ExpiresAt),
+		RevokedAt:  utcPtr(k.RevokedAt),
+	}, nil
 }
 
 func toCreateParams(job domain.Job) sqlcgen.CreateJobParams {

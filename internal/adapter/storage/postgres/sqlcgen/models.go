@@ -10,6 +10,18 @@ import (
 	"github.com/google/uuid"
 )
 
+type ApiKey struct {
+	ID         uuid.UUID
+	Name       string
+	Prefix     string
+	Hash       []byte
+	Scopes     []string
+	CreatedAt  time.Time
+	LastUsedAt *time.Time
+	ExpiresAt  *time.Time
+	RevokedAt  *time.Time
+}
+
 type Job struct {
 	ID              uuid.UUID
 	Queue           string
@@ -46,4 +58,22 @@ type Queue struct {
 	Paused    bool
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+type Schedule struct {
+	ID          uuid.UUID
+	Name        string
+	Cron        string
+	Timezone    string
+	Queue       string
+	JobType     string
+	Payload     []byte
+	Priority    int16
+	MaxAttempts int32
+	Enabled     bool
+	NextRunAt   time.Time
+	LastRunAt   *time.Time
+	LastJobID   *uuid.UUID
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }

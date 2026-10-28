@@ -82,8 +82,9 @@ func TestPostgresMigration_RoundTripPhase1Seed(t *testing.T) {
 	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err)
 
-	// Apply Phase 1 only (00001), seed, then up → down → up through 00002.
+	// Apply all migrations, roll back to Phase 1 (00001), seed, then up through latest.
 	require.NoError(t, postgres.Migrate(ctx, dsn))
+	require.NoError(t, postgres.MigrateDown(ctx, dsn)) // down 00003
 	require.NoError(t, postgres.MigrateDown(ctx, dsn)) // down 00002 → Phase 1 schema
 
 	pool, err := pgxpool.New(ctx, dsn)
@@ -100,7 +101,7 @@ func TestPostgresMigration_RoundTripPhase1Seed(t *testing.T) {
 	`, id, now)
 	require.NoError(t, err)
 
-	require.NoError(t, postgres.Migrate(ctx, dsn)) // up 00002 with Phase 1 data present
+	require.NoError(t, postgres.Migrate(ctx, dsn)) // up 00002 (+00003) with Phase 1 data present
 
 	var (
 		cancelRequested bool
