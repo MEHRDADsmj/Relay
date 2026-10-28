@@ -139,12 +139,13 @@ linters:
               desc: platform must not import app
             - pkg: github.com/MEHRDADsmj/relay/internal/adapter
               desc: platform must not import adapters
-        # SDK: never imports internal/.
+        # SDK: never imports internal/ (production). Tests may use adapters for dual-transport.
         sdk:
           list-mode: lax
           files:
             - "**/pkg/sdk/*.go"
             - "**/pkg/sdk/**/*.go"
+            - "!**/*_test.go"
           deny:
             - pkg: github.com/MEHRDADsmj/relay/internal
               desc: sdk must not import internal packages

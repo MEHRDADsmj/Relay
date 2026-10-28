@@ -83,6 +83,87 @@ type ListJobsOptions struct {
 	Limit int // 1..200; zero selects the server default
 }
 
+// Scope names for API keys (OpenAPI / proto parity).
+const (
+	ScopeProducer = "producer"
+	ScopeWorker   = "worker"
+	ScopeAdmin    = "admin"
+)
+
+// ScheduleInfo is a cron schedule as returned by the API.
+type ScheduleInfo struct {
+	ID          string
+	Name        string
+	Cron        string
+	Timezone    string
+	Queue       string
+	Type        string
+	Payload     []byte
+	Priority    int
+	MaxAttempts int
+	Enabled     bool
+	NextRunAt   time.Time
+	LastRunAt   *time.Time
+	LastJobID   string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// CreateScheduleRequest creates a cron schedule.
+type CreateScheduleRequest struct {
+	Name, Cron, Timezone, Queue, Type string
+	Payload                           any // marshaled to JSON
+	Priority                          int
+	MaxAttempts                       int
+	Enabled                           *bool // nil → server default (true)
+}
+
+// UpdateScheduleRequest is a partial schedule update.
+// ExpectedUpdatedAt is required (HTTP If-Match / gRPC expected_updated_at).
+type UpdateScheduleRequest struct {
+	ExpectedUpdatedAt time.Time
+	Cron              *string
+	Timezone          *string
+	Queue             *string
+	Type              *string
+	SetPayload        bool   // when true, Payload replaces stored value (including empty)
+	Payload           []byte // used when SetPayload
+	Priority          *int
+	MaxAttempts       *int
+	Enabled           *bool
+}
+
+// ListSchedulesOptions configures ListSchedules pagination.
+type ListSchedulesOptions struct {
+	Limit  int
+	Cursor string
+}
+
+// APIKeyInfo is an API key metadata row (secret never included).
+type APIKeyInfo struct {
+	ID         string
+	Name       string
+	Prefix     string
+	Scopes     []string
+	CreatedAt  time.Time
+	LastUsedAt *time.Time
+	ExpiresAt  *time.Time
+	RevokedAt  *time.Time
+}
+
+// CreateAPIKeyRequest creates a stored API key.
+type CreateAPIKeyRequest struct {
+	Name      string
+	Scopes    []string
+	ExpiresAt *time.Time
+}
+
+// CreatedAPIKey is returned once at creation; Secret is the full rly_… token.
+type CreatedAPIKey struct {
+	Key    APIKeyInfo
+	Secret string
+}
+
 // WorkerOptions configures a Worker. Zero values select defaults from §9 / phase-2 §6.
 type WorkerOptions struct {
 	Queue           string        // required

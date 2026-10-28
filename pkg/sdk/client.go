@@ -1,23 +1,15 @@
 package sdk
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
-	"strconv"
-	"strings"
-	"time"
 )
 
-// Client talks to a Relay HTTP API.
+// Client talks to a Relay server over HTTP or gRPC.
 type Client struct {
-	baseURL    string
-	apiKey     string
-	httpClient *http.Client
+	tr   transport
+	opts clientOptions
 }
 
 // ClientOption configures a Client.
@@ -26,155 +18,90 @@ type ClientOption func(*Client)
 // WithAPIKey sets the Bearer token used for Authorization.
 func WithAPIKey(key string) ClientOption {
 	return func(c *Client) {
-		c.apiKey = key
+		c.opts.apiKey = key
 	}
 }
 
-// WithHTTPClient replaces the default HTTP client.
+// WithHTTPClient replaces the default HTTP client (HTTP transport only).
 func WithHTTPClient(hc *http.Client) ClientOption {
 	return func(c *Client) {
-		c.httpClient = hc
+		c.opts.httpClient = hc
 	}
 }
 
-// NewClient builds a Client for baseURL (e.g. "http://localhost:7420").
-func NewClient(baseURL string, opts ...ClientOption) *Client {
-	c := &Client{
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		httpClient: http.DefaultClient,
-	}
+// NewClient builds a Client for target.
+// Schemes: http:// / https:// → HTTP; grpc:// / grpcs:// → gRPC.
+// WithTransport overrides scheme detection.
+func NewClient(target string, opts ...ClientOption) *Client {
+	c := &Client{}
 	for _, opt := range opts {
 		opt(c)
 	}
+	tr, err := buildTransport(target, c.opts)
+	if err != nil {
+		c.tr = &errTransport{err: err}
+		return c
+	}
+	c.tr = tr
 	return c
+}
+
+// Close releases transport resources (gRPC connections). Safe for HTTP.
+func (c *Client) Close() error {
+	if c == nil || c.tr == nil {
+		return nil
+	}
+	return c.tr.close()
 }
 
 // Enqueue creates a job (or returns an existing one on idempotent replay).
 func (c *Client) Enqueue(ctx context.Context, r EnqueueRequest) (JobInfo, error) {
-	body := map[string]any{
-		"queue": r.Queue,
-		"type":  r.Type,
-	}
-	if r.Payload != nil {
-		body["payload"] = r.Payload
-	}
-	if r.Priority != 0 {
-		body["priority"] = r.Priority
-	}
-	if !r.RunAt.IsZero() {
-		body["run_at"] = r.RunAt.UTC()
-	}
-	if r.MaxAttempts != 0 {
-		body["max_attempts"] = r.MaxAttempts
-	}
-	if r.IdempotencyKey != "" {
-		body["idempotency_key"] = r.IdempotencyKey
-	}
-	var out apiJob
-	if err := c.doJSON(ctx, http.MethodPost, "/v1/jobs", body, &out); err != nil {
-		return JobInfo{}, err
-	}
-	return out.toJobInfo(), nil
+	return c.tr.enqueue(ctx, r)
 }
 
 // GetJob fetches a job by ID.
 func (c *Client) GetJob(ctx context.Context, id string) (JobInfo, error) {
-	var out apiJob
-	if err := c.doJSON(ctx, http.MethodGet, "/v1/jobs/"+url.PathEscape(id), nil, &out); err != nil {
-		return JobInfo{}, err
-	}
-	return out.toJobInfo(), nil
+	return c.tr.getJob(ctx, id)
 }
 
 // CancelJob cancels a pending job or requests cancel on a running job.
 func (c *Client) CancelJob(ctx context.Context, id string) (JobInfo, error) {
-	var out apiJob
-	if err := c.doJSON(ctx, http.MethodPost, "/v1/jobs/"+url.PathEscape(id)+"/cancel", nil, &out); err != nil {
-		return JobInfo{}, err
-	}
-	return out.toJobInfo(), nil
+	return c.tr.cancelJob(ctx, id)
 }
 
 // RetryJob requeues a dead or cancelled job as pending.
 func (c *Client) RetryJob(ctx context.Context, id string) (JobInfo, error) {
-	var out apiJob
-	if err := c.doJSON(ctx, http.MethodPost, "/v1/jobs/"+url.PathEscape(id)+"/retry", nil, &out); err != nil {
-		return JobInfo{}, err
-	}
-	return out.toJobInfo(), nil
+	return c.tr.retryJob(ctx, id)
 }
 
 // ListAttempts returns attempt history for a job.
 func (c *Client) ListAttempts(ctx context.Context, id string) ([]AttemptInfo, error) {
-	var out struct {
-		Attempts []apiAttempt `json:"attempts"`
-	}
-	if err := c.doJSON(ctx, http.MethodGet, "/v1/jobs/"+url.PathEscape(id)+"/attempts", nil, &out); err != nil {
-		return nil, err
-	}
-	items := make([]AttemptInfo, 0, len(out.Attempts))
-	for _, a := range out.Attempts {
-		items = append(items, a.toAttemptInfo())
-	}
-	return items, nil
+	return c.tr.listAttempts(ctx, id)
 }
 
 // ListQueues returns all registered queues.
 func (c *Client) ListQueues(ctx context.Context) ([]QueueInfo, error) {
-	var out struct {
-		Queues []apiQueue `json:"queues"`
-	}
-	if err := c.doJSON(ctx, http.MethodGet, "/v1/queues", nil, &out); err != nil {
-		return nil, err
-	}
-	items := make([]QueueInfo, 0, len(out.Queues))
-	for _, q := range out.Queues {
-		items = append(items, q.toQueueInfo())
-	}
-	return items, nil
+	return c.tr.listQueues(ctx)
 }
 
 // QueueStats returns counters for a queue.
 func (c *Client) QueueStats(ctx context.Context, queue string) (QueueStatsInfo, error) {
-	var out apiQueueStats
-	if err := c.doJSON(ctx, http.MethodGet, "/v1/queues/"+url.PathEscape(queue), nil, &out); err != nil {
-		return QueueStatsInfo{}, err
-	}
-	return out.toQueueStatsInfo(), nil
+	return c.tr.queueStats(ctx, queue)
 }
 
 // PauseQueue pauses claims on a queue.
 func (c *Client) PauseQueue(ctx context.Context, queue string) (QueueInfo, error) {
-	var out apiQueue
-	if err := c.doJSON(ctx, http.MethodPost, "/v1/queues/"+url.PathEscape(queue)+"/pause", nil, &out); err != nil {
-		return QueueInfo{}, err
-	}
-	return out.toQueueInfo(), nil
+	return c.tr.pauseQueue(ctx, queue)
 }
 
 // ResumeQueue resumes a paused queue.
 func (c *Client) ResumeQueue(ctx context.Context, queue string) (QueueInfo, error) {
-	var out apiQueue
-	if err := c.doJSON(ctx, http.MethodPost, "/v1/queues/"+url.PathEscape(queue)+"/resume", nil, &out); err != nil {
-		return QueueInfo{}, err
-	}
-	return out.toQueueInfo(), nil
+	return c.tr.resumeQueue(ctx, queue)
 }
 
 // RetryDead bulk-retries dead jobs in a queue. limit 0 uses the server default.
 func (c *Client) RetryDead(ctx context.Context, queue string, limit int) (int, error) {
-	body := map[string]any{}
-	if limit > 0 {
-		body["limit"] = limit
-	}
-	var out struct {
-		Retried int `json:"retried"`
-	}
-	path := "/v1/queues/" + url.PathEscape(queue) + "/dead/retry"
-	if err := c.doJSON(ctx, http.MethodPost, path, body, &out); err != nil {
-		return 0, err
-	}
-	return out.Retried, nil
+	return c.tr.retryDead(ctx, queue, limit)
 }
 
 // ListJobs returns a range-over-func iterator that walks pages of jobs by status.
@@ -182,7 +109,7 @@ func (c *Client) ListJobs(ctx context.Context, queue, status string, opts ListJo
 	return func(yield func(JobInfo, error) bool) {
 		cursor := ""
 		for {
-			jobs, next, err := c.listJobsPage(ctx, queue, status, cursor, opts.Limit)
+			jobs, next, err := c.tr.listJobsPage(ctx, queue, status, cursor, opts.Limit)
 			if err != nil {
 				yield(JobInfo{}, err)
 				return
@@ -200,244 +127,191 @@ func (c *Client) ListJobs(ctx context.Context, queue, status string, opts ListJo
 	}
 }
 
-func (c *Client) listJobsPage(ctx context.Context, queue, status, cursor string, limit int) ([]JobInfo, string, error) {
-	q := url.Values{}
-	q.Set("status", status)
-	if limit > 0 {
-		q.Set("limit", strconv.Itoa(limit))
-	}
-	if cursor != "" {
-		q.Set("cursor", cursor)
-	}
-	path := "/v1/queues/" + url.PathEscape(queue) + "/jobs?" + q.Encode()
-	var out struct {
-		Jobs       []apiJob `json:"jobs"`
-		NextCursor string   `json:"next_cursor"`
-	}
-	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
-		return nil, "", err
-	}
-	items := make([]JobInfo, 0, len(out.Jobs))
-	for _, j := range out.Jobs {
-		items = append(items, j.toJobInfo())
-	}
-	return items, out.NextCursor, nil
+// CreateSchedule creates a cron schedule.
+func (c *Client) CreateSchedule(ctx context.Context, r CreateScheduleRequest) (ScheduleInfo, error) {
+	return c.tr.createSchedule(ctx, r)
 }
 
-func (c *Client) lease(ctx context.Context, queue, workerID string, maxJobs int, leaseSeconds, waitSeconds int) ([]apiJob, error) {
-	body := map[string]any{
-		"worker_id": workerID,
-		"max_jobs":  maxJobs,
-	}
-	if leaseSeconds > 0 {
-		body["lease_seconds"] = leaseSeconds
-	}
-	if waitSeconds > 0 {
-		body["wait_seconds"] = waitSeconds
-	}
-	path := "/v1/queues/" + url.PathEscape(queue) + "/leases"
-	var out struct {
-		Jobs []apiJob `json:"jobs"`
-	}
-	if err := c.doJSON(ctx, http.MethodPost, path, body, &out); err != nil {
-		return nil, err
-	}
-	return out.Jobs, nil
+// GetSchedule fetches a schedule by UUID or unique name.
+func (c *Client) GetSchedule(ctx context.Context, idOrName string) (ScheduleInfo, error) {
+	return c.tr.getSchedule(ctx, idOrName)
+}
+
+// ListSchedules returns a page of schedules.
+func (c *Client) ListSchedules(ctx context.Context, opts ListSchedulesOptions) ([]ScheduleInfo, string, error) {
+	return c.tr.listSchedules(ctx, opts)
+}
+
+// UpdateSchedule applies a partial update. ExpectedUpdatedAt is required (If-Match / expected_updated_at).
+func (c *Client) UpdateSchedule(ctx context.Context, id string, r UpdateScheduleRequest) (ScheduleInfo, error) {
+	return c.tr.updateSchedule(ctx, id, r)
+}
+
+// DeleteSchedule removes a schedule.
+func (c *Client) DeleteSchedule(ctx context.Context, id string) error {
+	return c.tr.deleteSchedule(ctx, id)
+}
+
+// EnableSchedule enables a schedule.
+func (c *Client) EnableSchedule(ctx context.Context, id string) (ScheduleInfo, error) {
+	return c.tr.enableSchedule(ctx, id)
+}
+
+// DisableSchedule disables a schedule.
+func (c *Client) DisableSchedule(ctx context.Context, id string) (ScheduleInfo, error) {
+	return c.tr.disableSchedule(ctx, id)
+}
+
+// TriggerSchedule enqueues a job for the schedule immediately.
+func (c *Client) TriggerSchedule(ctx context.Context, id string) (JobInfo, error) {
+	return c.tr.triggerSchedule(ctx, id)
+}
+
+// CreateAPIKey creates an API key; Secret is returned only once.
+func (c *Client) CreateAPIKey(ctx context.Context, r CreateAPIKeyRequest) (CreatedAPIKey, error) {
+	return c.tr.createAPIKey(ctx, r)
+}
+
+// ListAPIKeys lists keys without secrets.
+func (c *Client) ListAPIKeys(ctx context.Context) ([]APIKeyInfo, error) {
+	return c.tr.listAPIKeys(ctx)
+}
+
+// RevokeAPIKey revokes a key by ID.
+func (c *Client) RevokeAPIKey(ctx context.Context, id string) (APIKeyInfo, error) {
+	return c.tr.revokeAPIKey(ctx, id)
+}
+
+func (c *Client) lease(ctx context.Context, queue, workerID string, maxJobs, leaseSeconds, waitSeconds int) ([]apiJob, error) {
+	return c.tr.lease(ctx, queue, workerID, maxJobs, leaseSeconds, waitSeconds)
 }
 
 func (c *Client) heartbeat(ctx context.Context, jobID, workerID string, leaseSeconds int) (apiJob, error) {
-	body := map[string]any{"worker_id": workerID}
-	if leaseSeconds > 0 {
-		body["lease_seconds"] = leaseSeconds
-	}
-	var out apiJob
-	if err := c.doJSON(ctx, http.MethodPost, "/v1/jobs/"+url.PathEscape(jobID)+"/heartbeat", body, &out); err != nil {
-		return apiJob{}, err
-	}
-	return out, nil
+	return c.tr.heartbeat(ctx, jobID, workerID, leaseSeconds)
 }
 
 func (c *Client) complete(ctx context.Context, jobID, workerID string) error {
-	body := map[string]any{"worker_id": workerID}
-	return c.doJSON(ctx, http.MethodPost, "/v1/jobs/"+url.PathEscape(jobID)+"/complete", body, nil)
+	return c.tr.complete(ctx, jobID, workerID)
 }
 
 func (c *Client) fail(ctx context.Context, jobID, workerID, errMsg string, permanent bool) error {
-	body := map[string]any{
-		"worker_id": workerID,
-		"error":     errMsg,
-	}
-	if permanent {
-		body["permanent"] = true
-	}
-	return c.doJSON(ctx, http.MethodPost, "/v1/jobs/"+url.PathEscape(jobID)+"/fail", body, nil)
+	return c.tr.fail(ctx, jobID, workerID, errMsg, permanent)
 }
 
 func (c *Client) release(ctx context.Context, jobID, workerID string) error {
-	body := map[string]any{"worker_id": workerID}
-	return c.doJSON(ctx, http.MethodPost, "/v1/jobs/"+url.PathEscape(jobID)+"/release", body, nil)
+	return c.tr.release(ctx, jobID, workerID)
 }
 
-func (c *Client) doJSON(ctx context.Context, method, path string, body any, out any) error {
-	var rdr io.Reader
-	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("relay: marshal request: %w", err)
-		}
-		rdr = bytes.NewReader(b)
+// errTransport returns a fixed error from every method (invalid NewClient target).
+type errTransport struct{ err error }
+
+func (e *errTransport) close() error { return nil }
+
+func (e *errTransport) failErr() error {
+	if e == nil || e.err == nil {
+		return fmt.Errorf("relay: transport not configured")
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, rdr)
-	if err != nil {
-		return err
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	req.Header.Set("Accept", "application/json")
-	if c.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
-	res, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = res.Body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
-	if err != nil {
-		return err
-	}
-	if res.StatusCode >= 400 {
-		return parseAPIError(res.StatusCode, data)
-	}
-	if out == nil || res.StatusCode == http.StatusNoContent || len(data) == 0 {
-		return nil
-	}
-	if err := json.Unmarshal(data, out); err != nil {
-		return fmt.Errorf("relay: decode response: %w", err)
-	}
-	return nil
+	return e.err
 }
 
-func parseAPIError(status int, data []byte) error {
-	var p struct {
-		Type   string `json:"type"`
-		Title  string `json:"title"`
-		Detail string `json:"detail"`
-		Status int    `json:"status"`
-	}
-	_ = json.Unmarshal(data, &p)
-	ae := &APIError{
-		StatusCode: status,
-		Type:       p.Type,
-		Title:      p.Title,
-		Detail:     p.Detail,
-	}
-	if ae.Title == "" {
-		ae.Title = http.StatusText(status)
-	}
-	return ae
+func (e *errTransport) enqueue(context.Context, EnqueueRequest) (JobInfo, error) {
+	return JobInfo{}, e.failErr()
 }
 
-// apiJob is the wire shape of a Job from the HTTP API.
-type apiJob struct {
-	ID              string          `json:"id"`
-	Queue           string          `json:"queue"`
-	Type            string          `json:"type"`
-	Payload         json.RawMessage `json:"payload"`
-	Status          string          `json:"status"`
-	Priority        int             `json:"priority"`
-	RunAt           time.Time       `json:"run_at"`
-	Attempts        int             `json:"attempts"`
-	MaxAttempts     int             `json:"max_attempts"`
-	LeaseOwner      *string         `json:"lease_owner"`
-	LeaseExpiresAt  *time.Time      `json:"lease_expires_at"`
-	IdempotencyKey  *string         `json:"idempotency_key"`
-	LastError       *string         `json:"last_error"`
-	CancelRequested bool            `json:"cancel_requested"`
-	CancelledAt     *time.Time      `json:"cancelled_at"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
-	FinishedAt      *time.Time      `json:"finished_at"`
+func (e *errTransport) getJob(context.Context, string) (JobInfo, error) {
+	return JobInfo{}, e.failErr()
 }
 
-func (j apiJob) toJobInfo() JobInfo {
-	info := JobInfo{
-		ID:              j.ID,
-		Queue:           j.Queue,
-		Type:            j.Type,
-		Payload:         append([]byte(nil), j.Payload...),
-		Status:          j.Status,
-		Priority:        j.Priority,
-		RunAt:           j.RunAt,
-		Attempts:        j.Attempts,
-		MaxAttempts:     j.MaxAttempts,
-		LeaseExpiresAt:  j.LeaseExpiresAt,
-		CancelRequested: j.CancelRequested,
-		CancelledAt:     j.CancelledAt,
-		CreatedAt:       j.CreatedAt,
-		UpdatedAt:       j.UpdatedAt,
-		FinishedAt:      j.FinishedAt,
-	}
-	if j.LeaseOwner != nil {
-		info.LeaseOwner = *j.LeaseOwner
-	}
-	if j.IdempotencyKey != nil {
-		info.IdempotencyKey = *j.IdempotencyKey
-	}
-	if j.LastError != nil {
-		info.LastError = *j.LastError
-	}
-	return info
+func (e *errTransport) cancelJob(context.Context, string) (JobInfo, error) {
+	return JobInfo{}, e.failErr()
 }
 
-type apiAttempt struct {
-	JobID      string     `json:"job_id"`
-	Number     int        `json:"number"`
-	WorkerID   string     `json:"worker_id"`
-	StartedAt  time.Time  `json:"started_at"`
-	FinishedAt *time.Time `json:"finished_at"`
-	Outcome    string     `json:"outcome"`
-	Error      string     `json:"error"`
+func (e *errTransport) retryJob(context.Context, string) (JobInfo, error) {
+	return JobInfo{}, e.failErr()
 }
 
-func (a apiAttempt) toAttemptInfo() AttemptInfo {
-	return AttemptInfo(a)
+func (e *errTransport) listAttempts(context.Context, string) ([]AttemptInfo, error) {
+	return nil, e.failErr()
 }
 
-type apiQueue struct {
-	Name      string    `json:"name"`
-	Paused    bool      `json:"paused"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+func (e *errTransport) listQueues(context.Context) ([]QueueInfo, error) {
+	return nil, e.failErr()
 }
 
-func (q apiQueue) toQueueInfo() QueueInfo {
-	return QueueInfo(q)
+func (e *errTransport) queueStats(context.Context, string) (QueueStatsInfo, error) {
+	return QueueStatsInfo{}, e.failErr()
 }
 
-type apiQueueStats struct {
-	Queue                   string `json:"queue"`
-	Paused                  bool   `json:"paused"`
-	Pending                 int64  `json:"pending"`
-	Scheduled               int64  `json:"scheduled"`
-	Running                 int64  `json:"running"`
-	Succeeded               int64  `json:"succeeded"`
-	Dead                    int64  `json:"dead"`
-	Cancelled               int64  `json:"cancelled"`
-	OldestPendingAgeSeconds int64  `json:"oldest_pending_age_seconds"`
+func (e *errTransport) pauseQueue(context.Context, string) (QueueInfo, error) {
+	return QueueInfo{}, e.failErr()
 }
 
-func (s apiQueueStats) toQueueStatsInfo() QueueStatsInfo {
-	return QueueStatsInfo{
-		Queue:            s.Queue,
-		Paused:           s.Paused,
-		Pending:          s.Pending,
-		Scheduled:        s.Scheduled,
-		Running:          s.Running,
-		Succeeded:        s.Succeeded,
-		Dead:             s.Dead,
-		Cancelled:        s.Cancelled,
-		OldestPendingAge: time.Duration(s.OldestPendingAgeSeconds) * time.Second,
-	}
+func (e *errTransport) resumeQueue(context.Context, string) (QueueInfo, error) {
+	return QueueInfo{}, e.failErr()
+}
+
+func (e *errTransport) retryDead(context.Context, string, int) (int, error) {
+	return 0, e.failErr()
+}
+
+func (e *errTransport) listJobsPage(context.Context, string, string, string, int) ([]JobInfo, string, error) {
+	return nil, "", e.failErr()
+}
+
+func (e *errTransport) lease(context.Context, string, string, int, int, int) ([]apiJob, error) {
+	return nil, e.failErr()
+}
+
+func (e *errTransport) heartbeat(context.Context, string, string, int) (apiJob, error) {
+	return apiJob{}, e.failErr()
+}
+
+func (e *errTransport) complete(context.Context, string, string) error { return e.failErr() }
+
+func (e *errTransport) fail(context.Context, string, string, string, bool) error {
+	return e.failErr()
+}
+
+func (e *errTransport) release(context.Context, string, string) error { return e.failErr() }
+
+func (e *errTransport) createSchedule(context.Context, CreateScheduleRequest) (ScheduleInfo, error) {
+	return ScheduleInfo{}, e.failErr()
+}
+
+func (e *errTransport) getSchedule(context.Context, string) (ScheduleInfo, error) {
+	return ScheduleInfo{}, e.failErr()
+}
+
+func (e *errTransport) listSchedules(context.Context, ListSchedulesOptions) ([]ScheduleInfo, string, error) {
+	return nil, "", e.failErr()
+}
+
+func (e *errTransport) updateSchedule(context.Context, string, UpdateScheduleRequest) (ScheduleInfo, error) {
+	return ScheduleInfo{}, e.failErr()
+}
+
+func (e *errTransport) deleteSchedule(context.Context, string) error { return e.failErr() }
+
+func (e *errTransport) enableSchedule(context.Context, string) (ScheduleInfo, error) {
+	return ScheduleInfo{}, e.failErr()
+}
+
+func (e *errTransport) disableSchedule(context.Context, string) (ScheduleInfo, error) {
+	return ScheduleInfo{}, e.failErr()
+}
+
+func (e *errTransport) triggerSchedule(context.Context, string) (JobInfo, error) {
+	return JobInfo{}, e.failErr()
+}
+
+func (e *errTransport) createAPIKey(context.Context, CreateAPIKeyRequest) (CreatedAPIKey, error) {
+	return CreatedAPIKey{}, e.failErr()
+}
+
+func (e *errTransport) listAPIKeys(context.Context) ([]APIKeyInfo, error) {
+	return nil, e.failErr()
+}
+
+func (e *errTransport) revokeAPIKey(context.Context, string) (APIKeyInfo, error) {
+	return APIKeyInfo{}, e.failErr()
 }
