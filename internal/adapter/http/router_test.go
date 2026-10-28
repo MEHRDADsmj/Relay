@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -385,6 +386,85 @@ func TestReadyz_Unavailable(t *testing.T) {
 	require.Equal(t, "application/problem+json", res.Header.Get("Content-Type"))
 }
 
+func TestErrors_InternalServerError(t *testing.T) {
+	t.Parallel()
+	svc := app.NewJobService(
+		errorCreateRepo{err: errBoom},
+		fixedClock{t: time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)},
+		&seqIDs{ids: []domain.JobID{uuid.Must(uuid.Parse("01900000-0000-7000-8000-000000000010"))}},
+		app.FixedDelayRetryPolicy{Delay: time.Second},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	h := relayhttp.NewRouter(svc, relayhttp.Options{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	res := doJSON(t, h, http.MethodPost, "/v1/jobs", map[string]any{
+		"queue": "default",
+		"type":  "email.send",
+	}, nil)
+	require.Equal(t, http.StatusInternalServerError, res.Status)
+	require.Equal(t, "application/problem+json", res.Header.Get("Content-Type"))
+	var problem map[string]any
+	decodeBody(t, res, &problem)
+	require.Equal(t, float64(500), problem["status"])
+	require.Equal(t, "Internal Server Error", problem["title"])
+	require.Equal(t, "an unexpected error occurred", problem["detail"])
+	require.NotContains(t, problem, "errors")
+}
+
+func TestErrors_LeaseSecondsFieldRemap(t *testing.T) {
+	t.Parallel()
+	h, _ := testRouter(t, "")
+	res := doJSON(t, h, http.MethodPost, "/v1/queues/default/leases", map[string]any{
+		"worker_id":     "w1",
+		"lease_seconds": 1, // below domain MinLeaseDuration (5s) → lease_duration validation
+	}, nil)
+	require.Equal(t, http.StatusBadRequest, res.Status)
+	require.Equal(t, "application/problem+json", res.Header.Get("Content-Type"))
+	var problem map[string]any
+	decodeBody(t, res, &problem)
+	require.Equal(t, float64(400), problem["status"])
+	errs, ok := problem["errors"].([]any)
+	require.True(t, ok)
+	require.Len(t, errs, 1)
+	fe, ok := errs[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "lease_seconds", fe["field"])
+	require.NotEqual(t, "lease_duration", fe["field"])
+	require.NotEmpty(t, fe["message"])
+}
+
+func TestFail_ExhaustsToDead(t *testing.T) {
+	t.Parallel()
+	h, _ := testRouter(t, "")
+
+	res := doJSON(t, h, http.MethodPost, "/v1/jobs", map[string]any{
+		"queue":        "default",
+		"type":         "email.send",
+		"max_attempts": 1,
+	}, nil)
+	require.Equal(t, http.StatusCreated, res.Status)
+	var job map[string]any
+	decodeBody(t, res, &job)
+	id := job["id"].(string)
+
+	res = doJSON(t, h, http.MethodPost, "/v1/queues/default/leases", map[string]any{
+		"worker_id": "w1",
+	}, nil)
+	require.Equal(t, http.StatusOK, res.Status)
+
+	res = doJSON(t, h, http.MethodPost, "/v1/jobs/"+id+"/fail", map[string]any{
+		"worker_id": "w1",
+		"error":     "fatal",
+	}, nil)
+	require.Equal(t, http.StatusOK, res.Status)
+	decodeBody(t, res, &job)
+	require.Equal(t, "dead", job["status"])
+	require.Equal(t, "fatal", job["last_error"])
+}
+
+var errBoom = errors.New("storage boom")
+
 // failingPingRepo is a minimal JobRepository that fails Ping.
 type failingPingRepo struct{}
 
@@ -415,3 +495,34 @@ func (failingPingRepo) Fail(context.Context, domain.JobID, string, string, domai
 func (failingPingRepo) Ping(context.Context) error {
 	return context.DeadlineExceeded
 }
+
+// errorCreateRepo returns err from Create so the HTTP layer maps it to 500.
+type errorCreateRepo struct {
+	err error
+}
+
+func (r errorCreateRepo) Create(context.Context, domain.Job) (domain.Job, bool, error) {
+	return domain.Job{}, false, r.err
+}
+
+func (errorCreateRepo) Get(context.Context, domain.JobID) (domain.Job, error) {
+	return domain.Job{}, domain.ErrNotFound
+}
+
+func (errorCreateRepo) Claim(context.Context, string, string, int, time.Duration, time.Time) ([]domain.Job, error) {
+	return nil, nil
+}
+
+func (errorCreateRepo) ExtendLease(context.Context, domain.JobID, string, time.Duration, time.Time) (domain.Job, error) {
+	return domain.Job{}, domain.ErrNotFound
+}
+
+func (errorCreateRepo) Complete(context.Context, domain.JobID, string, time.Time) (domain.Job, error) {
+	return domain.Job{}, domain.ErrNotFound
+}
+
+func (errorCreateRepo) Fail(context.Context, domain.JobID, string, string, domain.FailureDecision, time.Time) (domain.Job, error) {
+	return domain.Job{}, domain.ErrNotFound
+}
+
+func (errorCreateRepo) Ping(context.Context) error { return nil }
