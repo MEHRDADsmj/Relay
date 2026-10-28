@@ -13,7 +13,6 @@ import (
 
 	"github.com/MEHRDADsmj/relay/internal/adapter/storage/postgres"
 	"github.com/MEHRDADsmj/relay/internal/adapter/storage/storagetest"
-	"github.com/MEHRDADsmj/relay/internal/app"
 )
 
 func TestPostgresRepository_Contract(t *testing.T) {
@@ -46,7 +45,7 @@ func TestPostgresRepository_Contract(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 
-	storagetest.RunContractTests(t, func(t *testing.T) app.JobRepository {
+	storagetest.RunContractTests(t, func(t *testing.T) storagetest.Backend {
 		t.Helper()
 		_, err := pool.Exec(ctx, "TRUNCATE TABLE jobs")
 		require.NoError(t, err)

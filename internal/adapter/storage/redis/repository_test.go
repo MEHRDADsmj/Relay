@@ -13,7 +13,6 @@ import (
 
 	storageredis "github.com/MEHRDADsmj/relay/internal/adapter/storage/redis"
 	"github.com/MEHRDADsmj/relay/internal/adapter/storage/storagetest"
-	"github.com/MEHRDADsmj/relay/internal/app"
 )
 
 func TestRedisRepository_Contract(t *testing.T) {
@@ -41,7 +40,7 @@ func TestRedisRepository_Contract(t *testing.T) {
 
 	require.NoError(t, client.Ping(ctx).Err())
 
-	storagetest.RunContractTests(t, func(t *testing.T) app.JobRepository {
+	storagetest.RunContractTests(t, func(t *testing.T) storagetest.Backend {
 		t.Helper()
 		require.NoError(t, client.FlushDB(ctx).Err())
 		return storageredis.New(client, "relay")

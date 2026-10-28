@@ -11,13 +11,27 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/MEHRDADsmj/relay/internal/app"
 	"github.com/MEHRDADsmj/relay/internal/domain"
 )
 
-// RunContractTests exercises the JobRepository contract (phase-1 §6.1).
-// Each subtest receives a fresh empty repository from newRepo.
-func RunContractTests(t *testing.T, newRepo func(t *testing.T) app.JobRepository) {
+// RunContractTests runs the full storage contract suite (Phase 1 + Phase 2).
+// Each subtest receives a fresh empty backend from newRepo.
+func RunContractTests(t *testing.T, newRepo func(t *testing.T) Backend) {
+	t.Helper()
+	RunJobContract(t, newRepo)
+	RunQueueContract(t, newRepo)
+	RunMaintenanceContract(t, newRepo)
+	RunNotifierContract(t, newRepo)
+}
+
+// RunJobContract exercises job repository semantics (Phase 1 + Phase 2 job cases).
+func RunJobContract(t *testing.T, newRepo func(t *testing.T) Backend) {
+	t.Helper()
+	runJobContractPhase1(t, newRepo)
+	runJobContractPhase2(t, newRepo)
+}
+
+func runJobContractPhase1(t *testing.T, newRepo func(t *testing.T) Backend) {
 	t.Helper()
 
 	t.Run("1_create_get_round_trip", func(t *testing.T) {
