@@ -272,6 +272,57 @@ func TestWorker_PanicRecovery(t *testing.T) {
 	cancel()
 }
 
+func TestWorker_HandlerErrorCallsFail(t *testing.T) {
+	t.Parallel()
+	api := &fakeAPI{}
+	var once sync.Once
+	api.leaseFn = func(string, map[string]any) (int, []map[string]any) {
+		var jobs []map[string]any
+		once.Do(func() {
+			jobs = []map[string]any{jobWire("aaaaaaaa-bbbb-cccc-dddd-000000000009", "default", "demo", map[string]any{"n": 1}, 1)}
+		})
+		return http.StatusOK, jobs
+	}
+	api.heartbeatFn = func(string, map[string]any) (int, map[string]any) {
+		return http.StatusOK, sampleJob("aaaaaaaa-bbbb-cccc-dddd-000000000009", nil)
+	}
+	failed := make(chan string, 1)
+	api.failFn = func(_ string, body map[string]any) int {
+		failed <- body["error"].(string)
+		return http.StatusOK
+	}
+
+	srv := api.start(t)
+	c := sdk.NewClient(srv.URL)
+	w, err := sdk.NewWorker(c, sdk.WorkerOptions{
+		Queue:           "default",
+		WorkerID:        "w1",
+		Concurrency:     1,
+		LeaseDuration:   time.Second,
+		PollMinInterval: 5 * time.Millisecond,
+		PollMaxInterval: 20 * time.Millisecond,
+		ShutdownTimeout: 2 * time.Second,
+	})
+	require.NoError(t, err)
+
+	sdk.Handle(w, "demo", func(context.Context, sdk.Job[demoArgs]) error {
+		return errors.New("handler blew up")
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = w.Run(ctx) }()
+
+	select {
+	case msg := <-failed:
+		require.Equal(t, "handler blew up", msg)
+		require.Equal(t, int32(0), api.completeCalls.Load())
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected fail with handler error message")
+	}
+	cancel()
+}
+
 func TestWorker_UnmarshalPayloadFails(t *testing.T) {
 	t.Parallel()
 	api := &fakeAPI{}
@@ -469,6 +520,53 @@ func TestWorker_ShutdownTimeout(t *testing.T) {
 	cancel()
 	err = <-done
 	require.True(t, errors.Is(err, sdk.ErrShutdownTimeout), "got %v", err)
+}
+
+func TestWorker_LeaseTransportErrorsKeepRunning(t *testing.T) {
+	t.Parallel()
+	api := &fakeAPI{}
+	api.leaseFn = func(string, map[string]any) (int, []map[string]any) {
+		return http.StatusInternalServerError, nil
+	}
+
+	srv := api.start(t)
+	// Force transport/API errors on every lease via 500 problem responses.
+	c := sdk.NewClient(srv.URL)
+	w, err := sdk.NewWorker(c, sdk.WorkerOptions{
+		Queue:           "default",
+		WorkerID:        "w1",
+		Concurrency:     1,
+		LeaseDuration:   time.Second,
+		PollMinInterval: 10 * time.Millisecond,
+		PollMaxInterval: 30 * time.Millisecond,
+		ShutdownTimeout: time.Second,
+	})
+	require.NoError(t, err)
+	sdk.Handle(w, "demo", func(context.Context, sdk.Job[demoArgs]) error { return nil })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- w.Run(ctx) }()
+
+	deadline := time.After(500 * time.Millisecond)
+	for api.leaseCalls.Load() < 3 {
+		select {
+		case err := <-done:
+			t.Fatalf("Run exited on transport errors: %v", err)
+		case <-deadline:
+			t.Fatalf("expected repeated lease attempts, got %d", api.leaseCalls.Load())
+		case <-time.After(15 * time.Millisecond):
+		}
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not stop after cancel")
+	}
+	require.GreaterOrEqual(t, api.leaseCalls.Load(), int32(3))
 }
 
 func TestWorker_BackoffResetOnJobs(t *testing.T) {
