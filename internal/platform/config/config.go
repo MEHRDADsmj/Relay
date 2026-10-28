@@ -59,6 +59,9 @@ type Config struct {
 	InstanceID       string
 	LogLevel         string
 	LogFormat        string
+	Environment      string
+	TraceSampleRatio float64
+	OTLPEndpoint     string
 }
 
 // Load reads configuration from environment variables and validates it.
@@ -92,6 +95,9 @@ func Load() (Config, error) {
 		SchedulerEnabled: true,
 		SchedulerTick:    time.Second,
 		InstanceID:       envOr("RELAY_INSTANCE_ID", defaultInstanceID()),
+		Environment:      envOr("RELAY_ENVIRONMENT", "development"),
+		TraceSampleRatio: 0.1,
+		OTLPEndpoint:     os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
 	}
 
 	var errs []string
@@ -138,6 +144,15 @@ func Load() (Config, error) {
 			errs = append(errs, fmt.Sprintf("RELAY_METRICS_MAX_SERIES: %v", err))
 		} else {
 			cfg.MetricsMaxSeries = n
+		}
+	}
+
+	if v := os.Getenv("RELAY_TRACE_SAMPLE_RATIO"); v != "" {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("RELAY_TRACE_SAMPLE_RATIO: %v", err))
+		} else {
+			cfg.TraceSampleRatio = f
 		}
 	}
 
@@ -319,6 +334,12 @@ func Load() (Config, error) {
 	}
 	if cfg.MetricsMaxSeries <= 0 {
 		errs = append(errs, "RELAY_METRICS_MAX_SERIES: must be greater than 0")
+	}
+	if cfg.TraceSampleRatio < 0 || cfg.TraceSampleRatio > 1 {
+		errs = append(errs, "RELAY_TRACE_SAMPLE_RATIO: must be between 0 and 1 inclusive")
+	}
+	if cfg.Environment == "" {
+		errs = append(errs, "RELAY_ENVIRONMENT: must not be empty")
 	}
 	if cfg.InstanceID == "" {
 		errs = append(errs, "RELAY_INSTANCE_ID: must not be empty")

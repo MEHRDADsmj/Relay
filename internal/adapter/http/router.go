@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/MEHRDADsmj/relay/internal/adapter/http/oapi"
 	"github.com/MEHRDADsmj/relay/internal/app"
@@ -22,6 +24,8 @@ type Options struct {
 	MaxBodyBytes int64
 	// Metrics, when set, wraps the router to record HTTP request metrics.
 	Metrics func(http.Handler) http.Handler
+	// Tracing enables otelhttp wrapping when true (default false for unit tests).
+	Tracing bool
 }
 
 // NewRouter builds the chi router with middleware and OpenAPI routes.
@@ -49,6 +53,9 @@ func NewRouter(
 	r.Use(AccessLog(log))
 	r.Use(BodyLimit(maxBody))
 	r.Use(Auth(opts.Auth, opts.APIKey))
+	if opts.Tracing {
+		r.Use(spanNameFromRoute)
+	}
 
 	h := NewHandler(jobs, queues, schedules, apiKeys, log)
 	strict := oapi.NewStrictHandlerWithOptions(h, nil, oapi.StrictHTTPServerOptions{
@@ -60,7 +67,28 @@ func NewRouter(
 		ErrorHandlerFunc: chiErrorHandler,
 	})
 	if opts.Metrics != nil {
-		return opts.Metrics(handler)
+		handler = opts.Metrics(handler)
+	}
+	if opts.Tracing {
+		handler = otelhttp.NewHandler(handler, "relay-http",
+			otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+				return r.Method + " " + r.URL.Path
+			}),
+		)
 	}
 	return handler
+}
+
+// spanNameFromRoute renames the active HTTP span to METHOD + chi route pattern after matching.
+func spanNameFromRoute(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+		if span := trace.SpanFromContext(r.Context()); span.IsRecording() {
+			if rc := chi.RouteContext(r.Context()); rc != nil {
+				if p := rc.RoutePattern(); p != "" {
+					span.SetName(r.Method + " " + p)
+				}
+			}
+		}
+	})
 }

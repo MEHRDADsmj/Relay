@@ -21,7 +21,10 @@ linters:
     - gocritic
     - misspell
     - nolintlint
+    - sloglint
   settings:
+    sloglint:
+      context: scope
     revive:
       rules:
         - name: package-comments
@@ -71,6 +74,12 @@ linters:
               desc: app must not import chi
             - pkg: github.com/robfig/cron
               desc: app must not import robfig; use adapter/cron
+            - pkg: go.opentelemetry.io/otel/sdk
+              desc: "app must not import otel sdk (API only: trace/attribute/codes)"
+            - pkg: go.opentelemetry.io/otel/exporters
+              desc: app must not import otel exporters
+            - pkg: go.opentelemetry.io/contrib
+              desc: app must not import otel contrib instrumentation
         # Adapters must not import sibling adapters.
         http-adapter:
           list-mode: lax

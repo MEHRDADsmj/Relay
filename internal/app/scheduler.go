@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/MEHRDADsmj/relay/internal/domain"
 )
 
@@ -32,6 +34,7 @@ type Scheduler struct {
 	log       *slog.Logger
 	cfg       SchedulerConfig
 	metrics   Metrics
+	tracer    trace.Tracer
 }
 
 // NewScheduler constructs a Scheduler. log may be nil.
@@ -62,12 +65,23 @@ func NewScheduler(
 		log:       log,
 		cfg:       cfg,
 		metrics:   NoopMetrics{},
+		tracer:    tracerOrNoop(nil),
 	}
 }
 
 // WithMetrics sets the metrics sink (nil → NoopMetrics).
 func (s *Scheduler) WithMetrics(m Metrics) *Scheduler {
 	s.metrics = metricsOrNoop(m)
+	return s
+}
+
+// WithTracerProvider sets the tracer used for scheduler spans (nil → noop).
+func (s *Scheduler) WithTracerProvider(tp trace.TracerProvider) *Scheduler {
+	if tp == nil {
+		s.tracer = tracerOrNoop(nil)
+		return s
+	}
+	s.tracer = tp.Tracer(appTracerName)
 	return s
 }
 
@@ -145,7 +159,11 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) error {
 	return nil
 }
 
-func (s *Scheduler) fireOne(ctx context.Context, sched domain.Schedule, now time.Time) error {
+func (s *Scheduler) fireOne(ctx context.Context, sched domain.Schedule, now time.Time) (err error) {
+	ctx, span := startSpan(ctx, s.tracer, "Scheduler.fire",
+		attrQueue(sched.Queue), attrJobType(sched.JobType))
+	defer func() { endSpan(span, err) }()
+
 	fire := sched.NextRunAt
 	loc, err := time.LoadLocation(sched.Timezone)
 	if err != nil {
@@ -171,7 +189,8 @@ func (s *Scheduler) fireOne(ctx context.Context, sched domain.Schedule, now time
 		s.metrics.SchedulerFired(sched.Name, false)
 		return fmt.Errorf("enqueue: %w", err)
 	}
-	if err := s.schedules.MarkFired(ctx, sched.ID, fire, now, next, job.ID); err != nil {
+	span.SetAttributes(attrJobID(job.ID))
+	if err = s.schedules.MarkFired(ctx, sched.ID, fire, now, next, job.ID); err != nil {
 		if errors.Is(err, domain.ErrConflict) {
 			s.log.DebugContext(ctx, "mark fired conflict skipped", "schedule_id", sched.ID)
 			s.metrics.SchedulerFired(sched.Name, true)

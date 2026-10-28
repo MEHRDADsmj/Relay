@@ -30,7 +30,7 @@ func NewWithWriter(level, format string, w io.Writer) (*slog.Logger, error) {
 	default:
 		return nil, fmt.Errorf("logging: invalid format %q (want json|text)", format)
 	}
-	return slog.New(handler), nil
+	return slog.New(NewTraceHandler(handler)), nil
 }
 
 func parseLevel(level string) (slog.Level, error) {

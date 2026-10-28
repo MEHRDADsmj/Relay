@@ -39,6 +39,9 @@ func TestLoad_Defaults(t *testing.T) {
 	require.NotEmpty(t, cfg.InstanceID)
 	require.Equal(t, "info", cfg.LogLevel)
 	require.Equal(t, "json", cfg.LogFormat)
+	require.Equal(t, "development", cfg.Environment)
+	require.InDelta(t, 0.1, cfg.TraceSampleRatio, 1e-9)
+	require.Empty(t, cfg.OTLPEndpoint)
 }
 
 func TestLoad_RedisRequiresURL(t *testing.T) {
@@ -122,6 +125,9 @@ func TestLoad_Overrides(t *testing.T) {
 	t.Setenv("RELAY_AUTH_CACHE_TTL", "15s")
 	t.Setenv("RELAY_LOG_LEVEL", "debug")
 	t.Setenv("RELAY_LOG_FORMAT", "text")
+	t.Setenv("RELAY_ENVIRONMENT", "staging")
+	t.Setenv("RELAY_TRACE_SAMPLE_RATIO", "1.0")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317")
 
 	cfg, err := Load()
 	require.NoError(t, err)
@@ -152,6 +158,9 @@ func TestLoad_Overrides(t *testing.T) {
 	require.Equal(t, "node-a", cfg.InstanceID)
 	require.Equal(t, "debug", cfg.LogLevel)
 	require.Equal(t, "text", cfg.LogFormat)
+	require.Equal(t, "staging", cfg.Environment)
+	require.InDelta(t, 1.0, cfg.TraceSampleRatio, 1e-9)
+	require.Equal(t, "localhost:4317", cfg.OTLPEndpoint)
 }
 
 func TestLoad_LegacyRetryDelaySetsBase(t *testing.T) {
@@ -205,6 +214,9 @@ func clearOptional(t *testing.T) {
 		"RELAY_INSTANCE_ID",
 		"RELAY_LOG_LEVEL",
 		"RELAY_LOG_FORMAT",
+		"RELAY_ENVIRONMENT",
+		"RELAY_TRACE_SAMPLE_RATIO",
+		"OTEL_EXPORTER_OTLP_ENDPOINT",
 	} {
 		t.Setenv(k, "")
 	}

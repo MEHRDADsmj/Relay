@@ -275,7 +275,7 @@ shutdown:
 		select {
 		case <-waitDone:
 		case <-secondary.C:
-			w.opts.Logger.Warn("shutdown: abandoning wait for in-flight jobs that ignore cancel")
+			w.opts.Logger.WarnContext(ctx, "shutdown: abandoning wait for in-flight jobs that ignore cancel")
 		}
 		return ErrShutdownTimeout
 	}
@@ -287,7 +287,7 @@ func (w *Worker) releaseJobs(ctx context.Context, ids []string) {
 			return
 		}
 		if err := w.client.release(ctx, id, w.opts.WorkerID); err != nil {
-			w.opts.Logger.Error("release on shutdown failed", "job_id", id, "err", err)
+			w.opts.Logger.ErrorContext(ctx, "release on shutdown failed", "job_id", id, "err", err)
 		}
 	}
 }
@@ -334,7 +334,7 @@ func (w *Worker) processJob(workerCtx context.Context, job apiJob, leaseSeconds 
 				drainResult(resultCh, w.opts.ShutdownTimeout)
 				return
 			}
-			w.opts.Logger.Error("heartbeat failed", "job_id", job.ID, "err", err)
+			w.opts.Logger.ErrorContext(workerCtx, "heartbeat failed", "job_id", job.ID, "err", err)
 		case <-workerCtx.Done():
 			// Bound the wait so a handler that ignores cancel cannot hang Run.
 			drainResult(resultCh, w.opts.ShutdownTimeout)
@@ -383,12 +383,12 @@ func (w *Worker) reportResult(ctx context.Context, job apiJob, result error) {
 	defer cancel()
 	if result == nil {
 		if err := w.client.complete(reportCtx, job.ID, w.opts.WorkerID); err != nil {
-			w.opts.Logger.Error("complete failed", "job_id", job.ID, "err", err)
+			w.opts.Logger.ErrorContext(reportCtx, "complete failed", "job_id", job.ID, "err", err)
 		}
 		return
 	}
 	if err := w.client.fail(reportCtx, job.ID, w.opts.WorkerID, result.Error(), isPermanent(result)); err != nil {
-		w.opts.Logger.Error("fail failed", "job_id", job.ID, "err", err)
+		w.opts.Logger.ErrorContext(reportCtx, "fail failed", "job_id", job.ID, "err", err)
 	}
 }
 

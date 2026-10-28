@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -27,6 +28,7 @@ type Maintenance struct {
 	cfg     MaintenanceConfig
 	log     *slog.Logger
 	metrics Metrics
+	tracer  trace.Tracer
 }
 
 // NewMaintenance constructs a Maintenance runner with defaults applied.
@@ -54,12 +56,22 @@ func NewMaintenance(repo MaintenanceRepository, clock Clock, cfg MaintenanceConf
 	if fullDefaults && cfg.Retention == 0 {
 		cfg.Retention = 168 * time.Hour
 	}
-	return &Maintenance{repo: repo, clock: clock, cfg: cfg, log: log, metrics: NoopMetrics{}}
+	return &Maintenance{repo: repo, clock: clock, cfg: cfg, log: log, metrics: NoopMetrics{}, tracer: tracerOrNoop(nil)}
 }
 
 // WithMetrics sets the metrics sink (nil → NoopMetrics).
 func (m *Maintenance) WithMetrics(metrics Metrics) *Maintenance {
 	m.metrics = metricsOrNoop(metrics)
+	return m
+}
+
+// WithTracerProvider sets the tracer used for maintenance spans (nil → noop).
+func (m *Maintenance) WithTracerProvider(tp trace.TracerProvider) *Maintenance {
+	if tp == nil {
+		m.tracer = tracerOrNoop(nil)
+		return m
+	}
+	m.tracer = tp.Tracer(appTracerName)
 	return m
 }
 
@@ -100,20 +112,23 @@ func (m *Maintenance) purgeLoop(ctx context.Context) error {
 }
 
 func (m *Maintenance) reapOnce(ctx context.Context) {
+	ctx, span := startSpan(ctx, m.tracer, "Maintenance.reap")
+	var runErr error
+	defer func() { endSpan(span, runErr) }()
+
 	start := time.Now()
 	affected := 0
-	var runErr error
 	for ctx.Err() == nil {
 		res, err := m.repo.ReapExpired(ctx, m.clock.Now(), m.cfg.ReapBatch)
 		if err != nil {
-			m.log.Error("reap expired failed", "err", err)
+			m.log.ErrorContext(ctx, "reap expired failed", "err", err)
 			runErr = err
 			break
 		}
 		n := res.Requeued + res.Dead
 		affected += n
 		if res.Requeued > 0 || res.Dead > 0 {
-			m.log.Info("reaped expired leases", "requeued", res.Requeued, "dead", res.Dead)
+			m.log.InfoContext(ctx, "reaped expired leases", "requeued", res.Requeued, "dead", res.Dead)
 		}
 		if n < m.cfg.ReapBatch {
 			break
@@ -126,20 +141,23 @@ func (m *Maintenance) purgeOnce(ctx context.Context) {
 	if m.cfg.Retention == 0 {
 		return
 	}
+	ctx, span := startSpan(ctx, m.tracer, "Maintenance.purge")
+	var runErr error
+	defer func() { endSpan(span, runErr) }()
+
 	start := time.Now()
 	affected := 0
-	var runErr error
 	before := m.clock.Now().Add(-m.cfg.Retention)
 	for ctx.Err() == nil {
 		n, err := m.repo.PurgeFinished(ctx, before, m.cfg.PurgeBatch)
 		if err != nil {
-			m.log.Error("purge finished failed", "err", err)
+			m.log.ErrorContext(ctx, "purge finished failed", "err", err)
 			runErr = err
 			break
 		}
 		affected += n
 		if n > 0 {
-			m.log.Info("purged finished jobs", "count", n, "before", before)
+			m.log.InfoContext(ctx, "purged finished jobs", "count", n, "before", before)
 		}
 		if n < m.cfg.PurgeBatch {
 			break

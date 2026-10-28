@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/MEHRDADsmj/relay/internal/domain"
 )
 
@@ -19,6 +21,7 @@ type JobService struct {
 	retry    RetryPolicy
 	log      *slog.Logger
 	metrics  Metrics
+	tracer   trace.Tracer
 }
 
 // NewJobService constructs a JobService. log may be nil (defaults to slog.Default).
@@ -38,6 +41,7 @@ func NewJobService(repo JobRepository, clock Clock, ids IDGenerator, retry Retry
 		retry:    retry,
 		log:      log,
 		metrics:  NoopMetrics{},
+		tracer:   tracerOrNoop(nil),
 	}
 }
 
@@ -47,13 +51,27 @@ func (s *JobService) WithMetrics(m Metrics) *JobService {
 	return s
 }
 
+// WithTracerProvider sets the tracer used for app spans (nil → noop).
+func (s *JobService) WithTracerProvider(tp trace.TracerProvider) *JobService {
+	if tp == nil {
+		s.tracer = tracerOrNoop(nil)
+		return s
+	}
+	s.tracer = tp.Tracer(appTracerName)
+	return s
+}
+
 // Enqueue validates and creates a pending job (idempotent on queue+key).
-func (s *JobService) Enqueue(ctx context.Context, cmd EnqueueCommand) (domain.Job, bool, error) {
-	if err := RequireScope(ctx, domain.ScopeProducer); err != nil {
+func (s *JobService) Enqueue(ctx context.Context, cmd EnqueueCommand) (job domain.Job, created bool, err error) {
+	ctx, span := startSpan(ctx, s.tracer, "JobService.Enqueue",
+		attrQueue(cmd.Queue), attrJobType(cmd.Type))
+	defer func() { endSpan(span, err) }()
+
+	if err = RequireScope(ctx, domain.ScopeProducer); err != nil {
 		return domain.Job{}, false, err
 	}
 	now := s.clock.Now()
-	job, err := domain.NewJob(domain.NewJobParams{
+	job, err = domain.NewJob(domain.NewJobParams{
 		Queue:          cmd.Queue,
 		Type:           cmd.Type,
 		Payload:        cmd.Payload,
@@ -65,10 +83,12 @@ func (s *JobService) Enqueue(ctx context.Context, cmd EnqueueCommand) (domain.Jo
 	if err != nil {
 		return domain.Job{}, false, err
 	}
-	stored, created, err := s.repo.Create(ctx, job)
+	var stored domain.Job
+	stored, created, err = s.repo.Create(ctx, job)
 	if err != nil {
 		return domain.Job{}, false, fmt.Errorf("create job: %w", err)
 	}
+	span.SetAttributes(attrJobID(stored.ID), attrJobType(stored.Type), attrQueue(stored.Queue))
 	s.metrics.JobEnqueued(stored.Queue, stored.Type, created)
 	return stored, created, nil
 }
@@ -92,14 +112,17 @@ func (s *JobService) Lease(ctx context.Context, cmd LeaseCommand) ([]domain.Job,
 }
 
 // LeaseWait claims jobs, optionally waiting up to Wait for a push wakeup or ticker.
-func (s *JobService) LeaseWait(ctx context.Context, cmd LeaseCommand) ([]domain.Job, error) {
-	if err := RequireScope(ctx, domain.ScopeWorker); err != nil {
+func (s *JobService) LeaseWait(ctx context.Context, cmd LeaseCommand) (jobs []domain.Job, err error) {
+	ctx, span := startSpan(ctx, s.tracer, "JobService.Lease", attrQueue(cmd.Queue))
+	defer func() { endSpan(span, err) }()
+
+	if err = RequireScope(ctx, domain.ScopeWorker); err != nil {
 		return nil, err
 	}
-	if err := domain.ValidateQueue(cmd.Queue); err != nil {
+	if err = domain.ValidateQueue(cmd.Queue); err != nil {
 		return nil, err
 	}
-	if err := domain.ValidateWorkerID(cmd.WorkerID); err != nil {
+	if err = domain.ValidateWorkerID(cmd.WorkerID); err != nil {
 		return nil, err
 	}
 	maxJobs, err := domain.NormalizeMaxJobs(cmd.MaxJobs)
@@ -117,7 +140,7 @@ func (s *JobService) LeaseWait(ctx context.Context, cmd LeaseCommand) ([]domain.
 
 	waitStarted := time.Now()
 	now := s.clock.Now()
-	jobs, err := s.repo.Claim(ctx, cmd.Queue, cmd.WorkerID, maxJobs, lease, now)
+	jobs, err = s.repo.Claim(ctx, cmd.Queue, cmd.WorkerID, maxJobs, lease, now)
 	if err != nil {
 		return nil, fmt.Errorf("claim jobs: %w", err)
 	}
@@ -200,20 +223,24 @@ func (s *JobService) Heartbeat(ctx context.Context, cmd HeartbeatCommand) (domai
 }
 
 // Complete marks a leased job as succeeded (or cancelled if requested).
-func (s *JobService) Complete(ctx context.Context, cmd CompleteCommand) (domain.Job, error) {
-	if err := RequireScope(ctx, domain.ScopeWorker); err != nil {
+func (s *JobService) Complete(ctx context.Context, cmd CompleteCommand) (job domain.Job, err error) {
+	ctx, span := startSpan(ctx, s.tracer, "JobService.Complete", attrJobID(cmd.JobID))
+	defer func() { endSpan(span, err) }()
+
+	if err = RequireScope(ctx, domain.ScopeWorker); err != nil {
 		return domain.Job{}, err
 	}
-	if err := domain.ValidateWorkerID(cmd.WorkerID); err != nil {
+	if err = domain.ValidateWorkerID(cmd.WorkerID); err != nil {
 		return domain.Job{}, err
 	}
 	now := s.clock.Now()
 	runDur := s.attemptRunDuration(ctx, cmd.JobID, now)
-	job, err := s.repo.Complete(ctx, cmd.JobID, cmd.WorkerID, now)
+	job, err = s.repo.Complete(ctx, cmd.JobID, cmd.WorkerID, now)
 	if err != nil {
 		s.recordLeaseLost(ctx, cmd.JobID, err)
 		return domain.Job{}, err
 	}
+	span.SetAttributes(attrQueue(job.Queue), attrJobType(job.Type), attrAttempt(job.Attempts))
 	outcome := domain.AttemptSucceeded
 	if job.Status == domain.StatusCancelled {
 		outcome = domain.AttemptCancelled
@@ -224,11 +251,14 @@ func (s *JobService) Complete(ctx context.Context, cmd CompleteCommand) (domain.
 
 // Fail records a failure and either schedules a retry or marks the job dead.
 // Permanent forces a dead decision. CancelRequested jobs become cancelled in the repo.
-func (s *JobService) Fail(ctx context.Context, cmd FailCommand) (domain.Job, error) {
-	if err := RequireScope(ctx, domain.ScopeWorker); err != nil {
+func (s *JobService) Fail(ctx context.Context, cmd FailCommand) (updated domain.Job, err error) {
+	ctx, span := startSpan(ctx, s.tracer, "JobService.Fail", attrJobID(cmd.JobID))
+	defer func() { endSpan(span, err) }()
+
+	if err = RequireScope(ctx, domain.ScopeWorker); err != nil {
 		return domain.Job{}, err
 	}
-	if err := domain.ValidateWorkerID(cmd.WorkerID); err != nil {
+	if err = domain.ValidateWorkerID(cmd.WorkerID); err != nil {
 		return domain.Job{}, err
 	}
 	now := s.clock.Now()
@@ -236,7 +266,7 @@ func (s *JobService) Fail(ctx context.Context, cmd FailCommand) (domain.Job, err
 	if err != nil {
 		return domain.Job{}, err
 	}
-	if err := job.EnsureLeasedBy(cmd.WorkerID, now); err != nil {
+	if err = job.EnsureLeasedBy(cmd.WorkerID, now); err != nil {
 		if errors.Is(err, domain.ErrLeaseLost) {
 			s.metrics.LeaseLost(job.Queue)
 		}
@@ -245,11 +275,12 @@ func (s *JobService) Fail(ctx context.Context, cmd FailCommand) (domain.Job, err
 	runDur := s.attemptRunDuration(ctx, cmd.JobID, now)
 	decision := job.DecideFailure(now, s.retry.NextDelay(job.Attempts), cmd.Permanent)
 	errMsg := domain.TruncateErrorMessage(cmd.Error)
-	updated, err := s.repo.Fail(ctx, cmd.JobID, cmd.WorkerID, errMsg, decision, now)
+	updated, err = s.repo.Fail(ctx, cmd.JobID, cmd.WorkerID, errMsg, decision, now)
 	if err != nil {
 		s.recordLeaseLost(ctx, cmd.JobID, err)
 		return domain.Job{}, err
 	}
+	span.SetAttributes(attrQueue(updated.Queue), attrJobType(updated.Type), attrAttempt(updated.Attempts))
 	outcome := domain.AttemptFailed
 	switch updated.Status {
 	case domain.StatusCancelled:

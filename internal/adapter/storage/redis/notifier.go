@@ -82,7 +82,7 @@ func (n *Notifier) loop(ctx context.Context) {
 			return
 		}
 		if err != nil {
-			n.log.Warn("redis notifier: subscribe interrupted", "err", err)
+			n.log.WarnContext(ctx, "redis notifier: subscribe interrupted", "err", err)
 		}
 		n.broadcastAll()
 		select {

@@ -18,6 +18,7 @@ import (
 
 	grpcprom "github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/MEHRDADsmj/relay/internal/domain"
 	"github.com/MEHRDADsmj/relay/internal/platform/config"
 	"github.com/MEHRDADsmj/relay/internal/platform/logging"
+	"github.com/MEHRDADsmj/relay/internal/platform/telemetry"
 )
 
 // Set via -ldflags at build time (Phase 4 GoReleaser).
@@ -88,6 +90,24 @@ func runServe() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	telShutdown, err := telemetry.Setup(ctx, telemetry.Config{
+		Endpoint:       cfg.OTLPEndpoint,
+		SampleRatio:    cfg.TraceSampleRatio,
+		ServiceVersion: version,
+		InstanceID:     cfg.InstanceID,
+		Environment:    cfg.Environment,
+	})
+	if err != nil {
+		return fmt.Errorf("telemetry: %w", err)
+	}
+	defer func() {
+		shCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer cancel()
+		if err := telShutdown(shCtx); err != nil {
+			log.ErrorContext(shCtx, "telemetry shutdown", "err", err)
+		}
+	}()
+
 	repo, cleanup, err := openRepository(ctx, cfg, log)
 	if err != nil {
 		return err
@@ -133,6 +153,7 @@ func runServe() error {
 
 	clock := app.SystemClock{}
 	notifier := mustNotifier(repo)
+	otelTP := otel.GetTracerProvider()
 	svc := app.NewJobService(
 		repo,
 		clock,
@@ -140,7 +161,7 @@ func runServe() error {
 		newRetryPolicy(cfg),
 		log,
 		notifier,
-	).WithMetrics(bizMetrics)
+	).WithMetrics(bizMetrics).WithTracerProvider(otelTP)
 	queues := app.NewQueueService(mustQueueRepo(repo), repo, clock)
 	queueStats := prom.NewQueueStatsCollector(queues, prom.QueueStatsOptions{})
 	if err := registry.Register(queueStats); err != nil {
@@ -164,6 +185,7 @@ func runServe() error {
 		Auth:    auth,
 		Logger:  log,
 		Metrics: httpMetrics.Middleware,
+		Tracing: true,
 	})
 
 	maint := app.NewMaintenance(mustMaintenanceRepo(repo), clock, app.MaintenanceConfig{
@@ -172,7 +194,7 @@ func runServe() error {
 		PurgeInterval: cfg.PurgeInterval,
 		PurgeBatch:    cfg.PurgeBatch,
 		Retention:     cfg.Retention,
-	}, log).WithMetrics(bizMetrics)
+	}, log).WithMetrics(bizMetrics).WithTracerProvider(otelTP)
 
 	elector, err := newLeaderElector(repo, cfg)
 	if err != nil {
@@ -180,7 +202,7 @@ func runServe() error {
 	}
 	scheduler := app.NewScheduler(scheduleRepo, svc, elector, cronParser, clock, app.SchedulerConfig{
 		Tick: cfg.SchedulerTick,
-	}, log).WithMetrics(bizMetrics)
+	}, log).WithMetrics(bizMetrics).WithTracerProvider(otelTP)
 
 	grpcSrv := adaptergrpc.NewServer(adaptergrpc.Services{
 		Jobs:      svc,
@@ -193,6 +215,7 @@ func runServe() error {
 		Reflection:    cfg.GRPCReflection,
 		Ready:         repo.Ping,
 		ServerMetrics: grpcMetrics,
+		Tracing:       true,
 	})
 	grpcLis, err := adaptergrpc.Listen(cfg.GRPCAddr)
 	if err != nil {
@@ -222,7 +245,7 @@ func runServe() error {
 	if cfg.ShutdownTimeout < cfg.LeaseMaxWait {
 		// With BaseContext, long-polls cancel immediately; still warn if drain budget is
 		// shorter than the configured max wait (operators may expect the old behaviour).
-		log.Warn("RELAY_SHUTDOWN_TIMEOUT is less than RELAY_LEASE_MAX_WAIT; BaseContext cancels long-polls on shutdown",
+		log.WarnContext(ctx, "RELAY_SHUTDOWN_TIMEOUT is less than RELAY_LEASE_MAX_WAIT; BaseContext cancels long-polls on shutdown",
 			"shutdown_timeout", cfg.ShutdownTimeout,
 			"lease_max_wait", cfg.LeaseMaxWait,
 		)
@@ -240,7 +263,7 @@ func runServe() error {
 	if cfg.SchedulerEnabled {
 		g.Go(func() error {
 			defer close(schedDone)
-			log.Info("scheduler starting", "tick", cfg.SchedulerTick, "instance_id", cfg.InstanceID)
+			log.InfoContext(schedCtx, "scheduler starting", "tick", cfg.SchedulerTick, "instance_id", cfg.InstanceID)
 			err := scheduler.Run(schedCtx)
 			if err == nil || errors.Is(err, context.Canceled) {
 				return nil
@@ -249,11 +272,11 @@ func runServe() error {
 		})
 	} else {
 		close(schedDone)
-		log.Info("scheduler disabled")
+		log.InfoContext(ctx, "scheduler disabled")
 	}
 
 	g.Go(func() error {
-		log.Info("http server listening", "addr", cfg.HTTPAddr, "storage", cfg.Storage)
+		log.InfoContext(ctx, "http server listening", "addr", cfg.HTTPAddr, "storage", cfg.Storage)
 		err := srv.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return fmt.Errorf("http listen: %w", err)
@@ -261,7 +284,7 @@ func runServe() error {
 		return nil
 	})
 	g.Go(func() error {
-		log.Info("grpc server listening", "addr", cfg.GRPCAddr, "reflection", cfg.GRPCReflection)
+		log.InfoContext(ctx, "grpc server listening", "addr", cfg.GRPCAddr, "reflection", cfg.GRPCReflection)
 		err := grpcSrv.Serve(grpcLis)
 		if err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 			return fmt.Errorf("grpc serve: %w", err)
@@ -269,7 +292,7 @@ func runServe() error {
 		return nil
 	})
 	g.Go(func() error {
-		log.Info("admin server listening", "addr", cfg.AdminAddr, "version", version, "commit", commit, "date", date)
+		log.InfoContext(ctx, "admin server listening", "addr", cfg.AdminAddr, "version", version, "commit", commit, "date", date)
 		err := adminSrv.Serve(nil)
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return fmt.Errorf("admin listen: %w", err)
@@ -286,18 +309,18 @@ func runServe() error {
 	g.Go(func() error {
 		<-gctx.Done()
 		// 1: stop scheduler (resign leadership).
-		log.Info("stopping scheduler")
+		log.InfoContext(gctx, "stopping scheduler")
 		schedCancel()
 		select {
 		case <-schedDone:
 		case <-time.After(5 * time.Second):
-			log.Warn("scheduler did not stop within 5s; continuing shutdown")
+			log.WarnContext(gctx, "scheduler did not stop within 5s; continuing shutdown")
 		}
 
 		// 2: stop accepting HTTP/gRPC/admin and drain.
 		shCtx, cancel := context.WithTimeout(context.WithoutCancel(gctx), cfg.ShutdownTimeout)
 		defer cancel()
-		log.Info("shutting down http, grpc, and admin servers", "timeout", cfg.ShutdownTimeout)
+		log.InfoContext(shCtx, "shutting down http, grpc, and admin servers", "timeout", cfg.ShutdownTimeout)
 		var shutdownErr error
 		if err := srv.Shutdown(shCtx); err != nil {
 			shutdownErr = fmt.Errorf("http shutdown: %w", err)
@@ -316,7 +339,7 @@ func runServe() error {
 	if err := g.Wait(); err != nil {
 		return err
 	}
-	log.Info("server stopped")
+	log.InfoContext(ctx, "server stopped")
 	return nil
 }
 
@@ -362,7 +385,7 @@ func openRepository(ctx context.Context, cfg config.Config, log *slog.Logger) (a
 		}
 		return repo, func() {
 			if err := repo.Close(); err != nil {
-				log.Error("redis close", "err", err)
+				log.ErrorContext(ctx, "redis close", "err", err)
 			}
 		}, nil
 	default:
@@ -409,16 +432,16 @@ func mustAPIKeyRepo(repo app.JobRepository) app.APIKeyRepository {
 func warnAuthConfig(ctx context.Context, log *slog.Logger, bootstrap string, keys app.APIKeyRepository) {
 	stored, err := keys.ListAPIKeys(ctx)
 	if err != nil {
-		log.Warn("unable to list API keys for auth startup check", "err", err)
+		log.WarnContext(ctx, "unable to list API keys for auth startup check", "err", err)
 		return
 	}
 	hasKeys := len(stored) > 0
 	if bootstrap == "" && !hasKeys {
-		log.Warn("auth disabled: RELAY_API_KEY is empty and no stored API keys exist")
+		log.WarnContext(ctx, "auth disabled: RELAY_API_KEY is empty and no stored API keys exist")
 		return
 	}
 	if bootstrap != "" && hasKeys {
-		log.Warn("RELAY_API_KEY bootstrap is set alongside stored API keys")
+		log.WarnContext(ctx, "RELAY_API_KEY bootstrap is set alongside stored API keys")
 	}
 }
 
@@ -441,10 +464,10 @@ func mustNotifier(repo app.JobRepository) app.JobNotifier {
 func migrateOnStart(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	switch cfg.Storage {
 	case config.StoragePostgres:
-		log.Info("running migrations on start")
+		log.InfoContext(ctx, "running migrations on start")
 		return postgres.Migrate(ctx, cfg.PostgresURL)
 	case config.StorageRedis:
-		log.Info("migrate on start skipped for redis storage")
+		log.InfoContext(ctx, "migrate on start skipped for redis storage")
 		return nil
 	default:
 		return fmt.Errorf("unsupported storage %q", cfg.Storage)

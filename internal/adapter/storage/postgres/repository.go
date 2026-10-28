@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -34,9 +35,14 @@ func (r *Repository) AttachNotifier(n *Notifier) {
 }
 
 // Open creates a pgx pool from databaseURL, attaches a Notifier, and returns a repository.
-// Call Close when finished.
+// Call Close when finished. Tracing uses otelpgx on the pool config.
 func Open(ctx context.Context, databaseURL string) (*Repository, error) {
-	pool, err := pgxpool.New(ctx, databaseURL)
+	cfg, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("postgres open: parse config: %w", err)
+	}
+	cfg.ConnConfig.Tracer = otelpgx.NewTracer()
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("postgres open: %w", err)
 	}

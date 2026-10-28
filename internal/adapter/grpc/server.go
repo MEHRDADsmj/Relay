@@ -7,6 +7,7 @@ import (
 	"time"
 
 	grpcprom "github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -32,6 +33,8 @@ type Options struct {
 	Ready func(context.Context) error
 	// ServerMetrics, when set, adds grpc_server_* interceptors (register on Prometheus separately).
 	ServerMetrics *grpcprom.ServerMetrics
+	// Tracing enables the otelgrpc stats handler.
+	Tracing bool
 }
 
 // Services holds app-layer dependencies for the gRPC adapter.
@@ -54,10 +57,14 @@ func NewServer(svc Services, opts Options) *grpc.Server {
 		unary = append([]grpc.UnaryServerInterceptor{opts.ServerMetrics.UnaryServerInterceptor()}, unary...)
 		stream = append([]grpc.StreamServerInterceptor{opts.ServerMetrics.StreamServerInterceptor()}, stream...)
 	}
-	s := grpc.NewServer(
+	serverOpts := []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(unary...),
 		grpc.ChainStreamInterceptor(stream...),
-	)
+	}
+	if opts.Tracing {
+		serverOpts = append(serverOpts, grpc.StatsHandler(otelgrpc.NewServerHandler()))
+	}
+	s := grpc.NewServer(serverOpts...)
 
 	relayv1.RegisterJobServiceServer(s, &jobServer{jobs: svc.Jobs})
 	relayv1.RegisterQueueServiceServer(s, &queueServer{queues: svc.Queues, jobs: svc.Jobs})

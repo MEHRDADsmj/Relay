@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/extra/redisotel/v9"
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/MEHRDADsmj/relay/internal/app"
@@ -77,6 +78,10 @@ func Open(ctx context.Context, redisURL, prefix string) (*Repository, error) {
 		return nil, fmt.Errorf("redis open: parse url: %w", err)
 	}
 	client := goredis.NewClient(opts)
+	if err := redisotel.InstrumentTracing(client); err != nil {
+		_ = client.Close()
+		return nil, fmt.Errorf("redis open: tracing: %w", err)
+	}
 	if err := client.Ping(ctx).Err(); err != nil {
 		_ = client.Close()
 		return nil, fmt.Errorf("redis open: ping: %w", err)

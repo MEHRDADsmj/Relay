@@ -83,7 +83,7 @@ func (n *Notifier) loop(ctx context.Context) {
 			return
 		}
 		if err != nil {
-			n.log.Warn("postgres notifier: listen interrupted", "err", err)
+			n.log.WarnContext(ctx, "postgres notifier: listen interrupted", "err", err)
 		}
 		n.broadcastAll()
 		select {
