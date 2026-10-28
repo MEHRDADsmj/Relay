@@ -6,37 +6,24 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
-	"net"
-	"net/http"
-	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
-	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 
-	adapterhttp "github.com/MEHRDADsmj/relay/internal/adapter/http"
-	"github.com/MEHRDADsmj/relay/internal/adapter/storage/postgres"
-	redisstore "github.com/MEHRDADsmj/relay/internal/adapter/storage/redis"
-	"github.com/MEHRDADsmj/relay/internal/app"
 	"github.com/MEHRDADsmj/relay/pkg/sdk"
 )
 
 const (
-	jobCount       = 2000
-	workerCount    = 3
-	concurrency    = 20
-	failEveryN     = 10 // 10% fail on first attempt
-	queueName      = "e2e"
-	jobType        = "e2e_work"
-	maxTestDur     = 60 * time.Second
-	retryDelay     = 50 * time.Millisecond
-	apiKey         = "e2e-test-key"
-	pollInterval   = 50 * time.Millisecond
+	jobCount     = 2000
+	workerCount  = 3
+	concurrency  = 20
+	failEveryN   = 10 // 10% fail on first attempt
+	queueName    = "e2e"
+	jobType      = "e2e_work"
+	maxTestDur = 60 * time.Second
 )
 
 type jobPayload struct {
@@ -56,109 +43,17 @@ func TestE2E_BothBackends(t *testing.T) {
 	})
 }
 
-type backend struct {
-	repo    app.JobRepository
-	cleanup func()
-}
-
-func startPostgresBackend(t *testing.T, ctx context.Context) backend {
-	t.Helper()
-	container, err := tcpostgres.Run(ctx,
-		"postgres:17-alpine",
-		tcpostgres.WithDatabase("relay"),
-		tcpostgres.WithUsername("relay"),
-		tcpostgres.WithPassword("relay"),
-		tcpostgres.BasicWaitStrategies(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		termCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		_ = container.Terminate(termCtx)
-	})
-
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-	require.NoError(t, postgres.Migrate(ctx, dsn))
-
-	repo, err := postgres.Open(ctx, dsn)
-	require.NoError(t, err)
-	return backend{
-		repo: repo,
-		cleanup: func() {
-			repo.Close()
-		},
-	}
-}
-
-func startRedisBackend(t *testing.T, ctx context.Context) backend {
-	t.Helper()
-	container, err := tcredis.Run(ctx, "redis:7-alpine")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		termCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		_ = container.Terminate(termCtx)
-	})
-
-	uri, err := container.ConnectionString(ctx)
-	require.NoError(t, err)
-
-	repo, err := redisstore.Open(ctx, uri, "relay")
-	require.NoError(t, err)
-	return backend{
-		repo: repo,
-		cleanup: func() {
-			_ = repo.Close()
-		},
-	}
-}
-
 func runE2E(t *testing.T, start func(*testing.T, context.Context) backend) {
 	t.Helper()
 	ctx := context.Background()
 	b := start(t, ctx)
 	t.Cleanup(b.cleanup)
 
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	clock := app.SystemClock{}
-	svc := app.NewJobService(
-		b.repo,
-		clock,
-		app.UUIDv7Generator{},
-		app.FixedDelayRetryPolicy{Delay: retryDelay},
-		log,
-		nil,
-	)
-	queueRepo, ok := b.repo.(app.QueueRepository)
-	require.True(t, ok, "backend must implement QueueRepository")
-	queues := app.NewQueueService(queueRepo, b.repo, clock)
-	handler := adapterhttp.NewRouter(svc, queues, adapterhttp.Options{
-		APIKey: apiKey,
-		Logger: log,
+	st := startStack(t, b, stackOpts{
+		retry:        nil, // default fixed 50ms
+		reapInterval: time.Second,
 	})
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	srv := &http.Server{
-		Handler:           handler,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-	serveErr := make(chan error, 1)
-	go func() {
-		serveErr <- srv.Serve(ln)
-	}()
-	t.Cleanup(func() {
-		shCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(shCtx)
-		if err := <-serveErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
-			t.Errorf("http serve: %v", err)
-		}
-	})
-
-	baseURL := "http://" + ln.Addr().String()
-	client := sdk.NewClient(baseURL, sdk.WithAPIKey(apiKey))
+	client := st.Client
 
 	deadline := time.Now().Add(maxTestDur)
 	startAt := time.Now()
@@ -172,7 +67,6 @@ func runE2E(t *testing.T, start func(*testing.T, context.Context) backend) {
 		succeededN atomic.Int64
 	)
 
-	// Enqueue 2000 jobs in parallel; every 10th fails on first attempt.
 	var (
 		enqWG  sync.WaitGroup
 		enqErr atomic.Value
@@ -228,10 +122,11 @@ func runE2E(t *testing.T, start func(*testing.T, context.Context) backend) {
 				WorkerID:        fmt.Sprintf("e2e-worker-%d", workerIdx),
 				Concurrency:     concurrency,
 				LeaseDuration:   30 * time.Second,
+				LeaseWait:       -1, // client poll; load test does not require long-poll
 				PollMinInterval: 20 * time.Millisecond,
 				PollMaxInterval: 200 * time.Millisecond,
 				ShutdownTimeout: 15 * time.Second,
-				Logger:          log,
+				Logger:          st.Log,
 			})
 			if err != nil {
 				workerErr.Store(err)
@@ -253,7 +148,6 @@ func runE2E(t *testing.T, start func(*testing.T, context.Context) backend) {
 		}(w)
 	}
 
-	// Wait for handlers to succeed, then confirm API status (complete may lag the handler return).
 	require.Eventually(t, func() bool {
 		return succeededN.Load() >= int64(jobCount)
 	}, time.Until(deadline), pollInterval, "handlers did not succeed all jobs before deadline")
