@@ -4,10 +4,11 @@ import "errors"
 
 // Sentinel errors returned by domain and application layers.
 var (
-	ErrNotFound   = errors.New("not found")
-	ErrValidation = errors.New("validation error")
-	ErrLeaseLost  = errors.New("lease lost")
-	ErrConflict   = errors.New("conflict")
+	ErrNotFound          = errors.New("not found")
+	ErrValidation        = errors.New("validation error")
+	ErrLeaseLost         = errors.New("lease lost")
+	ErrConflict          = errors.New("conflict")
+	ErrInvalidTransition = errors.New("invalid transition")
 )
 
 // ValidationError carries field-level detail and unwraps to ErrValidation.

@@ -126,7 +126,7 @@ func (s *JobService) Fail(ctx context.Context, cmd FailCommand) (domain.Job, err
 	if err := job.EnsureLeasedBy(cmd.WorkerID, now); err != nil {
 		return domain.Job{}, err
 	}
-	decision := job.DecideFailure(now, s.retry.NextDelay(job.Attempts))
+	decision := job.DecideFailure(now, s.retry.NextDelay(job.Attempts), false)
 	errMsg := domain.TruncateErrorMessage(cmd.Error)
 	updated, err := s.repo.Fail(ctx, cmd.JobID, cmd.WorkerID, errMsg, decision, now)
 	if err != nil {

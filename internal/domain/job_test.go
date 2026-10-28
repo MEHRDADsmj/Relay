@@ -167,7 +167,7 @@ func TestDecideFailure(t *testing.T) {
 				Attempts:    tt.attempts,
 				MaxAttempts: tt.max,
 			}
-			d := j.DecideFailure(now, delay)
+			d := j.DecideFailure(now, delay, false)
 			if d.NextStatus != tt.wantStatus {
 				t.Fatalf("NextStatus = %q, want %q", d.NextStatus, tt.wantStatus)
 			}
@@ -278,7 +278,8 @@ func TestEnsureLeasedBy(t *testing.T) {
 func TestStatusConstants(t *testing.T) {
 	t.Parallel()
 	if StatusPending != "pending" || StatusRunning != "running" ||
-		StatusSucceeded != "succeeded" || StatusDead != "dead" {
+		StatusSucceeded != "succeeded" || StatusDead != "dead" ||
+		StatusCancelled != "cancelled" {
 		t.Fatalf("unexpected status constants")
 	}
 }

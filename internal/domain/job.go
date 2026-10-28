@@ -17,26 +17,29 @@ const (
 	StatusRunning   Status = "running"
 	StatusSucceeded Status = "succeeded"
 	StatusDead      Status = "dead"
+	StatusCancelled Status = "cancelled"
 )
 
 // Job is the core Relay work unit.
 type Job struct {
-	ID             JobID
-	Queue          string
-	Type           string
-	Payload        []byte // raw JSON, opaque to Relay
-	Status         Status
-	Priority       int // -100..100, higher runs first
-	RunAt          time.Time
-	Attempts       int
-	MaxAttempts    int
-	LeaseOwner     string
-	LeaseExpiresAt *time.Time
-	IdempotencyKey string
-	LastError      string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	FinishedAt     *time.Time
+	ID              JobID
+	Queue           string
+	Type            string
+	Payload         []byte // raw JSON, opaque to Relay
+	Status          Status
+	Priority        int // -100..100, higher runs first
+	RunAt           time.Time
+	Attempts        int
+	MaxAttempts     int
+	LeaseOwner      string
+	LeaseExpiresAt  *time.Time
+	IdempotencyKey  string
+	LastError       string
+	CancelRequested bool
+	CancelledAt     *time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	FinishedAt      *time.Time
 }
 
 // NewJobParams holds caller-supplied fields for NewJob.
@@ -101,15 +104,41 @@ func NewJob(params NewJobParams, id JobID, now time.Time) (Job, error) {
 
 // DecideFailure chooses pending (retry) or dead based on Attempts vs MaxAttempts.
 // Attempts is assumed already incremented by the lease that is being failed.
-func (j Job) DecideFailure(now time.Time, retryDelay time.Duration) FailureDecision {
-	if j.Attempts < j.MaxAttempts {
-		runAt := now.Add(retryDelay)
-		return FailureDecision{
-			NextStatus: StatusPending,
-			NextRunAt:  &runAt,
-		}
+// When permanent is true the job always becomes dead (no retry).
+func (j Job) DecideFailure(now time.Time, retryDelay time.Duration, permanent bool) FailureDecision {
+	if permanent || j.Attempts >= j.MaxAttempts {
+		return FailureDecision{NextStatus: StatusDead}
 	}
-	return FailureDecision{NextStatus: StatusDead}
+	runAt := now.Add(retryDelay)
+	return FailureDecision{
+		NextStatus: StatusPending,
+		NextRunAt:  &runAt,
+	}
+}
+
+// CanCancel reports whether cancel is allowed from the job's current status.
+func (j Job) CanCancel() error {
+	if j.Status != StatusPending && j.Status != StatusRunning {
+		return ErrInvalidTransition
+	}
+	return nil
+}
+
+// CanRetry reports whether retry is allowed from the job's current status.
+func (j Job) CanRetry() error {
+	if j.Status != StatusDead && j.Status != StatusCancelled {
+		return ErrInvalidTransition
+	}
+	return nil
+}
+
+// ResolveOutcome maps a worker-requested terminal/retry status through cancel semantics.
+// If CancelRequested is set, any outcome becomes cancelled.
+func (j Job) ResolveOutcome(requested Status) Status {
+	if j.CancelRequested {
+		return StatusCancelled
+	}
+	return requested
 }
 
 // EnsureLeasedBy returns ErrLeaseLost unless the job is running under owner with an unexpired lease.
