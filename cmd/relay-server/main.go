@@ -21,6 +21,7 @@ import (
 	"github.com/MEHRDADsmj/relay/internal/adapter/storage/postgres"
 	redisstore "github.com/MEHRDADsmj/relay/internal/adapter/storage/redis"
 	"github.com/MEHRDADsmj/relay/internal/app"
+	"github.com/MEHRDADsmj/relay/internal/domain"
 	"github.com/MEHRDADsmj/relay/internal/platform/config"
 	"github.com/MEHRDADsmj/relay/internal/platform/logging"
 )
@@ -86,6 +87,9 @@ func runServe() error {
 		}
 	}
 
+	// Apply configured long-poll cap before any LeaseWait calls.
+	domain.MaxLeaseWait = cfg.LeaseMaxWait
+
 	clock := app.SystemClock{}
 	notifier := mustNotifier(repo)
 	svc := app.NewJobService(
@@ -115,8 +119,8 @@ func runServe() error {
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		// WriteTimeout must exceed max lease wait_seconds (30s); see phase-2 §5.
-		WriteTimeout: 45 * time.Second,
+		// WriteTimeout must exceed max lease wait_seconds; see phase-2 §5.
+		WriteTimeout: cfg.LeaseMaxWait + 15*time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 

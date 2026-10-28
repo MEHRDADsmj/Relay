@@ -279,6 +279,36 @@ func TestNormalizeLeaseDuration(t *testing.T) {
 	}
 }
 
+func TestNormalizeLeaseWait(t *testing.T) {
+	// Not parallel: mutates package var MaxLeaseWait.
+	prev := MaxLeaseWait
+	t.Cleanup(func() { MaxLeaseWait = prev })
+
+	got, err := NormalizeLeaseWait(0)
+	if err != nil || got != 0 {
+		t.Fatalf("NormalizeLeaseWait(0) = %v, %v", got, err)
+	}
+	got, err = NormalizeLeaseWait(30 * time.Second)
+	if err != nil || got != 30*time.Second {
+		t.Fatalf("NormalizeLeaseWait(30s) = %v, %v", got, err)
+	}
+	if _, err := NormalizeLeaseWait(31 * time.Second); err == nil {
+		t.Fatal("expected error for wait > default MaxLeaseWait")
+	}
+
+	MaxLeaseWait = 60 * time.Second
+	got, err = NormalizeLeaseWait(45 * time.Second)
+	if err != nil || got != 45*time.Second {
+		t.Fatalf("NormalizeLeaseWait(45s) with MaxLeaseWait=60s = %v, %v", got, err)
+	}
+	if _, err := NormalizeLeaseWait(61 * time.Second); err == nil {
+		t.Fatal("expected error for wait > configured MaxLeaseWait")
+	}
+	if _, err := NormalizeLeaseWait(-time.Second); err == nil {
+		t.Fatal("expected error for negative wait")
+	}
+}
+
 func TestNormalizeMaxJobs(t *testing.T) {
 	t.Parallel()
 

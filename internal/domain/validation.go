@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"time"
 	"unicode/utf8"
@@ -31,13 +32,14 @@ const (
 	MinMaxJobs       = 1
 	MaxMaxJobs       = 100
 
-	// MaxLeaseWait is the maximum long-poll duration for leases.
-	MaxLeaseWait = 30 * time.Second
-
 	DefaultRetryAllDeadLimit = 1000
 	MinRetryAllDeadLimit     = 1
 	MaxRetryAllDeadLimit     = 10_000
 )
+
+// MaxLeaseWait is the maximum long-poll duration for leases.
+// Default 30s; relay-server overrides from RELAY_LEASE_MAX_WAIT at startup.
+var MaxLeaseWait = 30 * time.Second
 
 var (
 	queuePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
@@ -167,7 +169,7 @@ func NormalizePageLimit(limit int) (int, error) {
 // NormalizeLeaseWait defaults unset values and validates 0..MaxLeaseWait.
 func NormalizeLeaseWait(d time.Duration) (time.Duration, error) {
 	if d < 0 || d > MaxLeaseWait {
-		return 0, validationErrorf("wait", "must be between 0s and 30s")
+		return 0, validationErrorf("wait", fmt.Sprintf("must be between 0s and %s", MaxLeaseWait))
 	}
 	return d, nil
 }
