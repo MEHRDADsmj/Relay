@@ -99,6 +99,18 @@ linters:
               desc: redis must not import http adapter
             - pkg: github.com/MEHRDADsmj/relay/internal/adapter/storage/postgres
               desc: redis must not import postgres adapter
+        memory-adapter:
+          list-mode: lax
+          files:
+            - "**/internal/adapter/storage/memory/*.go"
+            - "**/internal/adapter/storage/memory/**/*.go"
+          deny:
+            - pkg: github.com/MEHRDADsmj/relay/internal/adapter/http
+              desc: memory must not import http adapter
+            - pkg: github.com/MEHRDADsmj/relay/internal/adapter/storage/postgres
+              desc: memory must not import postgres adapter
+            - pkg: github.com/MEHRDADsmj/relay/internal/adapter/storage/redis
+              desc: memory must not import redis adapter
         # Platform: no domain/app/adapters.
         platform:
           list-mode: lax
