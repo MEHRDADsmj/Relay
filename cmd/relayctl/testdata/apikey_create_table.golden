@@ -1,0 +1,6 @@
+ID         00000000-0000-0000-0000-000000000000
+Name       prod
+Prefix     PREFIX12
+Scopes     producer,worker
+CreatedAt  2026-10-28T12:00:00Z
+Secret     rly_PREFIX_SECRET

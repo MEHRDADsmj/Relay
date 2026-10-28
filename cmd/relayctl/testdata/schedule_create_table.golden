@@ -1,0 +1,13 @@
+ID           00000000-0000-0000-0000-000000000000
+Name         hourly-demo
+Cron         @hourly
+Timezone     UTC
+Queue        default
+Type         demo.job
+Priority     0
+MaxAttempts  10
+Enabled      true
+NextRunAt    2026-10-28T12:00:00Z
+LastRunAt    
+LastJobID    
+UpdatedAt    2026-10-28T12:00:00Z

@@ -1,0 +1,38 @@
+[
+  {
+    "attempts": 0,
+    "cancel_requested": false,
+    "created_at": "2026-10-28T12:00:00Z",
+    "id": "00000000-0000-0000-0000-000000000000",
+    "idempotency_key": "k2",
+    "last_error": "",
+    "max_attempts": 10,
+    "payload": {
+      "n": 2
+    },
+    "priority": 0,
+    "queue": "default",
+    "run_at": "2026-10-28T12:00:00Z",
+    "status": "pending",
+    "type": "demo.job",
+    "updated_at": "2026-10-28T12:00:00Z"
+  },
+  {
+    "attempts": 0,
+    "cancel_requested": false,
+    "created_at": "2026-10-28T12:00:00Z",
+    "id": "00000000-0000-0000-0000-000000000000",
+    "idempotency_key": "k1",
+    "last_error": "",
+    "max_attempts": 3,
+    "payload": {
+      "n": 1
+    },
+    "priority": 5,
+    "queue": "default",
+    "run_at": "2026-10-28T12:00:00Z",
+    "status": "pending",
+    "type": "demo.job",
+    "updated_at": "2026-10-28T12:00:00Z"
+  }
+]

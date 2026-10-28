@@ -1,0 +1,17 @@
+{
+  "created_at": "2026-10-28T12:00:00Z",
+  "cron": "@hourly",
+  "enabled": true,
+  "id": "00000000-0000-0000-0000-000000000000",
+  "max_attempts": 10,
+  "name": "hourly-demo",
+  "next_run_at": "2026-10-28T12:00:00Z",
+  "payload": {
+    "from": "sched"
+  },
+  "priority": 0,
+  "queue": "default",
+  "timezone": "UTC",
+  "type": "demo.job",
+  "updated_at": "2026-10-28T12:00:00Z"
+}

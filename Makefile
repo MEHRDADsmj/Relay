@@ -11,10 +11,16 @@ endif
 GO ?= go
 GOLANGCI_LINT ?= golangci-lint
 
+# Injected into relayctl / relay-server via -ldflags (Phase 4 GoReleaser will override).
+VERSION ?= dev
+COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)
+LDFLAGS ?= -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
+
 # Docker build-arg for module downloads. Default goproxy.io for hosts where
 # proxy.golang.org returns 403. CI / raw `docker compose` without this var keep
 # the Dockerfile default (proxy.golang.org). Override:
-#   make up COMPOSE_GOPROXY=https://proxy.golang.org,direct
+#   make up COMPOSE_GOPROXY=https://goproxy.io,direct
 COMPOSE_GOPROXY ?= https://goproxy.io,direct
 
 .DEFAULT_GOAL := help
@@ -31,7 +37,7 @@ help: ## list targets
 	@echo "  make test-integration  - integration tests (-tags=integration)"
 	@echo "  make test-e2e          - end-to-end tests (-tags=e2e)"
 	@echo "  make cover             - unit coverage report -> coverage.html"
-	@echo "  make build             - build binaries into bin/"
+	@echo "  make build             - build binaries into bin/ (add bin to PATH)"
 	@echo "  make up / make down    - full compose stack up/down"
 	@echo "  make up-redis          - compose with RELAY_STORAGE=redis"
 	@echo "  make deps              - start postgres + redis only"
@@ -84,10 +90,12 @@ cover: ## unit coverage HTML
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "wrote coverage.html"
 
-build: ## build server and examples
+build: ## build server, relayctl, and examples into bin/
 	$(GO) build -o bin/relay-server$(EXE) ./cmd/relay-server
+	$(GO) build -ldflags "$(LDFLAGS)" -o bin/relayctl$(EXE) ./cmd/relayctl
 	$(GO) build -o bin/example-worker$(EXE) ./examples/worker
 	$(GO) build -o bin/example-producer$(EXE) ./examples/producer
+	@echo "built bin/relay-server$(EXE) bin/relayctl$(EXE) (refresh PATH: export PATH=\"$$PWD/bin:$$PATH\")"
 
 up: ## docker compose up
 	COMPOSE_GOPROXY=$(COMPOSE_GOPROXY) docker compose up -d --build --scale example-worker=2

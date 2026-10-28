@@ -1,0 +1,10 @@
+ID              00000000-0000-0000-0000-000000000000
+Queue           default
+Type            demo.job
+Status          pending
+Priority        0
+RunAt           2026-10-28T12:00:00Z
+Attempts        0/10
+IdempotencyKey  k2
+CreatedAt       2026-10-28T12:00:00Z
+UpdatedAt       2026-10-28T12:00:00Z

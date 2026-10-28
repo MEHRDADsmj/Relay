@@ -1,0 +1,2 @@
+ID                                    NAME         CRON     TZ   QUEUE    TYPE      ENABLED  NEXT_RUN
+00000000-0000-0000-0000-000000000000  hourly-demo  @hourly  UTC  default  demo.job  true     2026-10-28T12:00:00Z

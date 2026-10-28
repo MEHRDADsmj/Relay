@@ -149,6 +149,16 @@ linters:
           deny:
             - pkg: github.com/MEHRDADsmj/relay/internal
               desc: sdk must not import internal packages
+        # relayctl: SDK only (production). Tests may wire httptest + memory for goldens.
+        relayctl:
+          list-mode: lax
+          files:
+            - "**/cmd/relayctl/*.go"
+            - "**/cmd/relayctl/**/*.go"
+            - "!**/*_test.go"
+          deny:
+            - pkg: github.com/MEHRDADsmj/relay/internal
+              desc: relayctl must not import internal; use pkg/sdk
   exclusions:
     generated: lax
     paths:
