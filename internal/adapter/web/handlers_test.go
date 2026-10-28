@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -147,7 +148,7 @@ func TestUI_SSE_NoGoleak(t *testing.T) {
 	}()
 
 	deadline := time.After(2 * time.Second)
-	for !strings.Contains(rec.buf.String(), "event: overview") {
+	for !strings.Contains(rec.snapshot(), "event: overview") {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for SSE event")
@@ -216,13 +217,21 @@ func shortJob(id string) string {
 type sseRecorder struct {
 	headers http.Header
 	code    int
+	mu      sync.Mutex
 	buf     strings.Builder
 	done    chan struct{}
 }
 
 func (r *sseRecorder) Header() http.Header { return r.headers }
 func (r *sseRecorder) Write(b []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.buf.Write(b)
 }
 func (r *sseRecorder) WriteHeader(statusCode int) { r.code = statusCode }
 func (r *sseRecorder) Flush()                     {}
+func (r *sseRecorder) snapshot() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.buf.String()
+}
