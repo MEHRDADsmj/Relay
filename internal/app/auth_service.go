@@ -1,6 +1,7 @@
 package app
 
 import (
+	"container/list"
 	"context"
 	"crypto/subtle"
 	"errors"
@@ -25,13 +26,16 @@ type AuthService struct {
 	log          *slog.Logger
 	bootstrapKey string
 	cacheTTL     time.Duration
+	cacheSlots   int
 
 	mu         sync.Mutex
-	cache      map[string]authCacheEntry // secret hash → entry
-	lastUsedAt map[string]time.Time      // key id → last persisted touch
+	cache      map[string]*list.Element // secret hash → LRU element
+	lru        *list.List               // front = most recently used
+	lastUsedAt map[string]time.Time     // key id → last persisted touch
 }
 
 type authCacheEntry struct {
+	key       string
 	principal domain.Principal
 	expires   time.Time
 	negative  bool
@@ -41,6 +45,8 @@ type authCacheEntry struct {
 type AuthServiceConfig struct {
 	BootstrapKey string
 	CacheTTL     time.Duration
+	// CacheSlots is the max LRU entries (default 1024). Values <= 0 use the default.
+	CacheSlots int
 }
 
 // NewAuthService constructs an AuthService. log may be nil.
@@ -52,13 +58,19 @@ func NewAuthService(repo APIKeyRepository, clock Clock, cfg AuthServiceConfig, l
 	if ttl <= 0 {
 		ttl = defaultAuthCacheTTL
 	}
+	slots := cfg.CacheSlots
+	if slots <= 0 {
+		slots = defaultAuthCacheSlots
+	}
 	return &AuthService{
 		repo:         repo,
 		clock:        clock,
 		log:          log,
 		bootstrapKey: cfg.BootstrapKey,
 		cacheTTL:     ttl,
-		cache:        make(map[string]authCacheEntry),
+		cacheSlots:   slots,
+		cache:        make(map[string]*list.Element),
+		lru:          list.New(),
 		lastUsedAt:   make(map[string]time.Time),
 	}
 }
@@ -72,7 +84,7 @@ func (s *AuthService) Authenticate(ctx context.Context, secret string) (domain.P
 	cacheKey := string(HashAPIKeySecret(secret))
 
 	s.mu.Lock()
-	if e, ok := s.cache[cacheKey]; ok && e.expires.After(now) {
+	if e := s.cacheGetLocked(cacheKey, now); e != nil {
 		s.mu.Unlock()
 		if e.negative {
 			return domain.Principal{}, domain.ErrUnauthenticated
@@ -139,17 +151,49 @@ func (s *AuthService) IsOpen(ctx context.Context) (bool, error) {
 	return len(keys) == 0, nil
 }
 
+// cacheGetLocked returns a live cache entry and marks it MRU. Caller must hold s.mu.
+func (s *AuthService) cacheGetLocked(cacheKey string, now time.Time) *authCacheEntry {
+	el, ok := s.cache[cacheKey]
+	if !ok {
+		return nil
+	}
+	e := el.Value.(*authCacheEntry)
+	if !e.expires.After(now) {
+		s.lru.Remove(el)
+		delete(s.cache, cacheKey)
+		return nil
+	}
+	s.lru.MoveToFront(el)
+	return e
+}
+
 func (s *AuthService) putCache(cacheKey string, p domain.Principal, negative bool, now time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.cache) >= defaultAuthCacheSlots {
-		// drop arbitrary entry (simple bound; not strict LRU)
-		for k := range s.cache {
-			delete(s.cache, k)
+	if el, ok := s.cache[cacheKey]; ok {
+		e := el.Value.(*authCacheEntry)
+		e.principal = p
+		e.expires = now.Add(s.cacheTTL)
+		e.negative = negative
+		s.lru.MoveToFront(el)
+		return
+	}
+	for s.lru.Len() >= s.cacheSlots {
+		back := s.lru.Back()
+		if back == nil {
 			break
 		}
+		victim := back.Value.(*authCacheEntry)
+		s.lru.Remove(back)
+		delete(s.cache, victim.key)
 	}
-	s.cache[cacheKey] = authCacheEntry{principal: p, expires: now.Add(s.cacheTTL), negative: negative}
+	entry := &authCacheEntry{
+		key:       cacheKey,
+		principal: p,
+		expires:   now.Add(s.cacheTTL),
+		negative:  negative,
+	}
+	s.cache[cacheKey] = s.lru.PushFront(entry)
 }
 
 func (s *AuthService) touchLastUsed(ctx context.Context, id string, now time.Time) {

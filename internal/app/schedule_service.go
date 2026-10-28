@@ -117,6 +117,36 @@ func (s *ScheduleService) Update(ctx context.Context, cmd UpdateScheduleCommand)
 	if err != nil {
 		return domain.Schedule{}, err
 	}
+	return s.applyUpdate(ctx, cur, cmd)
+}
+
+// Enable sets enabled=true.
+func (s *ScheduleService) Enable(ctx context.Context, id domain.ScheduleID) (domain.Schedule, error) {
+	return s.setEnabled(ctx, id, true)
+}
+
+// Disable sets enabled=false.
+func (s *ScheduleService) Disable(ctx context.Context, id domain.ScheduleID) (domain.Schedule, error) {
+	return s.setEnabled(ctx, id, false)
+}
+
+func (s *ScheduleService) setEnabled(ctx context.Context, id domain.ScheduleID, enabled bool) (domain.Schedule, error) {
+	if err := RequireScope(ctx, domain.ScopeAdmin); err != nil {
+		return domain.Schedule{}, err
+	}
+	cur, err := s.repo.GetSchedule(ctx, id)
+	if err != nil {
+		return domain.Schedule{}, err
+	}
+	en := enabled
+	return s.applyUpdate(ctx, cur, UpdateScheduleCommand{
+		ID:                id,
+		ExpectedUpdatedAt: cur.UpdatedAt,
+		Enabled:           &en,
+	})
+}
+
+func (s *ScheduleService) applyUpdate(ctx context.Context, cur domain.Schedule, cmd UpdateScheduleCommand) (domain.Schedule, error) {
 	if !cur.UpdatedAt.Equal(cmd.ExpectedUpdatedAt) {
 		return domain.Schedule{}, domain.ErrConflict
 	}
@@ -173,32 +203,6 @@ func (s *ScheduleService) Update(ctx context.Context, cmd UpdateScheduleCommand)
 		return domain.Schedule{}, fmt.Errorf("update schedule: %w", err)
 	}
 	return stored, nil
-}
-
-// Enable sets enabled=true.
-func (s *ScheduleService) Enable(ctx context.Context, id domain.ScheduleID) (domain.Schedule, error) {
-	return s.setEnabled(ctx, id, true)
-}
-
-// Disable sets enabled=false.
-func (s *ScheduleService) Disable(ctx context.Context, id domain.ScheduleID) (domain.Schedule, error) {
-	return s.setEnabled(ctx, id, false)
-}
-
-func (s *ScheduleService) setEnabled(ctx context.Context, id domain.ScheduleID, enabled bool) (domain.Schedule, error) {
-	if err := RequireScope(ctx, domain.ScopeAdmin); err != nil {
-		return domain.Schedule{}, err
-	}
-	cur, err := s.repo.GetSchedule(ctx, id)
-	if err != nil {
-		return domain.Schedule{}, err
-	}
-	en := enabled
-	return s.Update(ctx, UpdateScheduleCommand{
-		ID:                id,
-		ExpectedUpdatedAt: cur.UpdatedAt,
-		Enabled:           &en,
-	})
 }
 
 // Delete removes a schedule.
