@@ -68,6 +68,8 @@ services:
       args:
         CMD: example-worker
         GOPROXY: ${COMPOSE_GOPROXY:-https://proxy.golang.org,direct}
+    deploy:
+      replicas: 2
     environment:
       RELAY_URL: http://relay-server:7420
       RELAY_API_KEY: ${RELAY_API_KEY:-}
