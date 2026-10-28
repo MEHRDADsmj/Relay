@@ -1,4 +1,4 @@
-# Placeholder until api/openapi.yaml exists (Task T5).
+# oapi-codegen config for the Relay HTTP API (Task T5).
 package: oapi
 generate:
   chi-server: true
@@ -6,3 +6,5 @@ generate:
   models: true
   embedded-spec: true
 output: internal/adapter/http/oapi/oapi.gen.go
+output-options:
+  skip-prune: false

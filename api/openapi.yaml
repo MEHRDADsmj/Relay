@@ -1,0 +1,455 @@
+openapi: 3.0.3
+info:
+  title: Relay API
+  description: HTTP API for the Relay job queue.
+  version: 0.1.0
+servers:
+  - url: /
+paths:
+  /healthz:
+    get:
+      operationId: getHealthz
+      summary: Liveness probe
+      tags: [health]
+      responses:
+        "200":
+          description: Process is up
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /readyz:
+    get:
+      operationId: getReadyz
+      summary: Readiness probe
+      tags: [health]
+      responses:
+        "200":
+          description: Storage is reachable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: Storage is unavailable
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/jobs:
+    post:
+      operationId: enqueueJob
+      summary: Enqueue a job
+      tags: [jobs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnqueueRequest"
+      responses:
+        "200":
+          description: Existing job returned for an idempotent replay
+          headers:
+            Idempotent-Replayed:
+              description: Set to "true" when the response is an idempotent hit
+              required: true
+              schema:
+                type: string
+                enum: ["true"]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "201":
+          description: Job created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /v1/jobs/{id}:
+    get:
+      operationId: getJob
+      summary: Get a job by ID
+      tags: [jobs]
+      parameters:
+        - $ref: "#/components/parameters/JobID"
+      responses:
+        "200":
+          description: Job found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /v1/queues/{queue}/leases:
+    post:
+      operationId: leaseJobs
+      summary: Lease jobs from a queue
+      tags: [leases]
+      parameters:
+        - name: queue
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LeaseRequest"
+      responses:
+        "200":
+          description: Leased jobs (possibly empty)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeaseResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /v1/jobs/{id}/heartbeat:
+    post:
+      operationId: heartbeatJob
+      summary: Extend a job lease
+      tags: [jobs]
+      parameters:
+        - $ref: "#/components/parameters/JobID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HeartbeatRequest"
+      responses:
+        "200":
+          description: Lease extended
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /v1/jobs/{id}/complete:
+    post:
+      operationId: completeJob
+      summary: Mark a job succeeded
+      tags: [jobs]
+      parameters:
+        - $ref: "#/components/parameters/JobID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteRequest"
+      responses:
+        "200":
+          description: Job succeeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /v1/jobs/{id}/fail:
+    post:
+      operationId: failJob
+      summary: Report a job failure
+      tags: [jobs]
+      parameters:
+        - $ref: "#/components/parameters/JobID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FailRequest"
+      responses:
+        "200":
+          description: Failure recorded (pending retry or dead)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  parameters:
+    JobID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+    EnqueueRequest:
+      type: object
+      required: [queue, type]
+      properties:
+        queue:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+        type:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$'
+        payload:
+          description: Opaque JSON payload (defaults to {})
+          # Alias avoids duplicate encoding/json import in generated code.
+          x-go-type: jraw.RawMessage
+          x-go-type-import:
+            name: jraw
+            path: encoding/json
+        priority:
+          type: integer
+          minimum: -100
+          maximum: 100
+        run_at:
+          type: string
+          format: date-time
+        max_attempts:
+          type: integer
+          minimum: 1
+          maximum: 100
+        idempotency_key:
+          type: string
+          maxLength: 255
+    LeaseRequest:
+      type: object
+      required: [worker_id]
+      properties:
+        worker_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        max_jobs:
+          type: integer
+          minimum: 1
+          maximum: 100
+        lease_seconds:
+          type: integer
+          minimum: 5
+          maximum: 900
+          description: Lease duration in seconds (default 30)
+    HeartbeatRequest:
+      type: object
+      required: [worker_id]
+      properties:
+        worker_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        lease_seconds:
+          type: integer
+          minimum: 5
+          maximum: 900
+    CompleteRequest:
+      type: object
+      required: [worker_id]
+      properties:
+        worker_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+    FailRequest:
+      type: object
+      required: [worker_id, error]
+      properties:
+        worker_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        error:
+          type: string
+    LeaseResponse:
+      type: object
+      required: [jobs]
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/Job"
+    Job:
+      type: object
+      required:
+        - id
+        - queue
+        - type
+        - payload
+        - status
+        - priority
+        - run_at
+        - attempts
+        - max_attempts
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        queue:
+          type: string
+        type:
+          type: string
+        payload:
+          description: Opaque JSON payload
+          x-go-type: jraw.RawMessage
+          x-go-type-import:
+            name: jraw
+            path: encoding/json
+        status:
+          type: string
+          enum: [pending, running, succeeded, dead]
+        priority:
+          type: integer
+        run_at:
+          type: string
+          format: date-time
+        attempts:
+          type: integer
+        max_attempts:
+          type: integer
+        lease_owner:
+          type: string
+        lease_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        idempotency_key:
+          type: string
+        last_error:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+  responses:
+    BadRequest:
+      description: Validation or malformed request
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Unauthorized:
+      description: Missing or invalid API key
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    NotFound:
+      description: Resource not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Conflict:
+      description: Lease lost or conflict
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    PayloadTooLarge:
+      description: Request body exceeds 1 MiB
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    InternalError:
+      description: Unexpected server error
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
