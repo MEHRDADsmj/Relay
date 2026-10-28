@@ -25,6 +25,7 @@ type JobInfo struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	FinishedAt      *time.Time
+	TraceContext    map[string]string // W3C traceparent/tracestate from enqueue
 }
 
 // EnqueueRequest is the producer-side enqueue payload.
@@ -175,4 +176,5 @@ type WorkerOptions struct {
 	PollMaxInterval time.Duration // default 2s
 	ShutdownTimeout time.Duration // default 30s
 	Logger          *slog.Logger  // default slog.Default()
+	Hooks           Hooks         // optional worker metrics/lifecycle hooks
 }

@@ -466,24 +466,25 @@ func parseAPIError(status int, data []byte) error {
 
 // apiJob is the wire shape of a Job from the HTTP API.
 type apiJob struct {
-	ID              string          `json:"id"`
-	Queue           string          `json:"queue"`
-	Type            string          `json:"type"`
-	Payload         json.RawMessage `json:"payload"`
-	Status          string          `json:"status"`
-	Priority        int             `json:"priority"`
-	RunAt           time.Time       `json:"run_at"`
-	Attempts        int             `json:"attempts"`
-	MaxAttempts     int             `json:"max_attempts"`
-	LeaseOwner      *string         `json:"lease_owner"`
-	LeaseExpiresAt  *time.Time      `json:"lease_expires_at"`
-	IdempotencyKey  *string         `json:"idempotency_key"`
-	LastError       *string         `json:"last_error"`
-	CancelRequested bool            `json:"cancel_requested"`
-	CancelledAt     *time.Time      `json:"cancelled_at"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
-	FinishedAt      *time.Time      `json:"finished_at"`
+	ID              string            `json:"id"`
+	Queue           string            `json:"queue"`
+	Type            string            `json:"type"`
+	Payload         json.RawMessage   `json:"payload"`
+	Status          string            `json:"status"`
+	Priority        int               `json:"priority"`
+	RunAt           time.Time         `json:"run_at"`
+	Attempts        int               `json:"attempts"`
+	MaxAttempts     int               `json:"max_attempts"`
+	LeaseOwner      *string           `json:"lease_owner"`
+	LeaseExpiresAt  *time.Time        `json:"lease_expires_at"`
+	IdempotencyKey  *string           `json:"idempotency_key"`
+	LastError       *string           `json:"last_error"`
+	CancelRequested bool              `json:"cancel_requested"`
+	CancelledAt     *time.Time        `json:"cancelled_at"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
+	FinishedAt      *time.Time        `json:"finished_at"`
+	TraceContext    map[string]string `json:"trace_context"`
 }
 
 func (j apiJob) toJobInfo() JobInfo {
@@ -512,6 +513,12 @@ func (j apiJob) toJobInfo() JobInfo {
 	}
 	if j.LastError != nil {
 		info.LastError = *j.LastError
+	}
+	if len(j.TraceContext) > 0 {
+		info.TraceContext = make(map[string]string, len(j.TraceContext))
+		for k, v := range j.TraceContext {
+			info.TraceContext[k] = v
+		}
 	}
 	return info
 }

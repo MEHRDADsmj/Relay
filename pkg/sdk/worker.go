@@ -86,12 +86,22 @@ func NewWorker(c *Client, opts WorkerOptions) (*Worker, error) {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
+	if opts.Hooks == nil {
+		opts.Hooks = NopHooks{}
+	}
 	return &Worker{
 		client:   c,
 		opts:     opts,
 		handlers: make(map[string]jobHandler),
 		inflight: make(map[string]struct{}),
 	}, nil
+}
+
+func (w *Worker) hooks() Hooks {
+	if w.opts.Hooks == nil {
+		return NopHooks{}
+	}
+	return w.opts.Hooks
 }
 
 // Handle registers a typed handler for jobType. Panics if Run has already started.
@@ -201,7 +211,9 @@ func (w *Worker) Run(ctx context.Context) error {
 			free = maxLeaseBatch
 		}
 
+		leaseStart := time.Now()
 		jobs, err := w.client.lease(ctx, w.opts.Queue, w.opts.WorkerID, free, leaseSeconds, waitSeconds)
+		w.hooks().OnLease(w.opts.Queue, len(jobs), time.Since(leaseStart), err)
 		if err != nil {
 			if ctx.Err() != nil {
 				break
@@ -293,8 +305,13 @@ func (w *Worker) releaseJobs(ctx context.Context, ids []string) {
 }
 
 func (w *Worker) processJob(workerCtx context.Context, job apiJob, leaseSeconds int) {
+	start := time.Now()
+	w.hooks().OnJobStart(job.Queue, job.Type)
+
 	jobCtx, cancel := context.WithCancel(workerCtx)
 	defer cancel()
+
+	jobCtx, span := w.startConsumerSpan(jobCtx, job)
 
 	h, hasHandler := w.handlerFor(job.Type)
 
@@ -310,19 +327,28 @@ func (w *Worker) processJob(workerCtx context.Context, job apiJob, leaseSeconds 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	finish := func(outcome string, handlerErr error) {
+		endConsumerSpan(span, handlerErr)
+		w.hooks().OnJobEnd(job.Queue, job.Type, time.Since(start), outcome)
+	}
+
 	for {
 		select {
 		case err := <-resultCh:
 			if workerCtx.Err() != nil {
 				// Shutdown cancelled the job context; skip reporting if we did not finish cleanly.
+				finish("cancelled", err)
 				return
 			}
+			outcome := outcomeFromResult(err, job.CancelRequested)
 			w.reportResult(workerCtx, job, err)
+			finish(outcome, err)
 			return
 		case <-ticker.C:
 			hbCtx, hbCancel := context.WithTimeout(context.WithoutCancel(workerCtx), 5*time.Second)
 			hbJob, err := w.client.heartbeat(hbCtx, job.ID, w.opts.WorkerID, leaseSeconds)
 			hbCancel()
+			w.hooks().OnHeartbeat(job.Queue, err)
 			if err == nil {
 				if hbJob.CancelRequested {
 					cancel()
@@ -332,15 +358,36 @@ func (w *Worker) processJob(workerCtx context.Context, job apiJob, leaseSeconds 
 			if errors.Is(err, ErrLeaseLost) {
 				cancel()
 				drainResult(resultCh, w.opts.ShutdownTimeout)
+				finish("lease_lost", err)
 				return
 			}
 			w.opts.Logger.ErrorContext(workerCtx, "heartbeat failed", "job_id", job.ID, "err", err)
 		case <-workerCtx.Done():
 			// Bound the wait so a handler that ignores cancel cannot hang Run.
 			drainResult(resultCh, w.opts.ShutdownTimeout)
+			finish("cancelled", workerCtx.Err())
 			return
 		}
 	}
+}
+
+func outcomeFromResult(err error, cancelRequested bool) string {
+	if err == nil {
+		if cancelRequested {
+			return "cancelled"
+		}
+		return "succeeded"
+	}
+	if cancelRequested || errors.Is(err, context.Canceled) {
+		return "cancelled"
+	}
+	if len(err.Error()) >= 6 && err.Error()[:6] == "panic:" {
+		return "panic"
+	}
+	if isPermanent(err) {
+		return "permanent"
+	}
+	return "failed"
 }
 
 // drainResult waits up to bound for the handler result, then returns so the

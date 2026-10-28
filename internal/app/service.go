@@ -83,6 +83,10 @@ func (s *JobService) Enqueue(ctx context.Context, cmd EnqueueCommand) (job domai
 	if err != nil {
 		return domain.Job{}, false, err
 	}
+	job.TraceContext, err = domain.NormalizeTraceContext(injectTraceContext(ctx))
+	if err != nil {
+		return domain.Job{}, false, err
+	}
 	var stored domain.Job
 	stored, created, err = s.repo.Create(ctx, job)
 	if err != nil {

@@ -47,6 +47,13 @@ func jobToAPI(j domain.Job) oapi.Job {
 		t := j.CancelledAt.UTC()
 		out.CancelledAt = &t
 	}
+	if len(j.TraceContext) > 0 {
+		tc := make(map[string]string, len(j.TraceContext))
+		for k, v := range j.TraceContext {
+			tc[k] = v
+		}
+		out.TraceContext = &tc
+	}
 	return out
 }
 

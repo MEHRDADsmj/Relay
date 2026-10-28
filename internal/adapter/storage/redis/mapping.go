@@ -136,7 +136,30 @@ func mapToJob(m map[string]string) (domain.Job, error) {
 		FinishedAt:      finishedAt,
 		CancelRequested: boolFromRedis(m["cancel_requested"]),
 		CancelledAt:     cancelledAt,
+		TraceContext:    decodeTraceContextJSON(m["trace_context"]),
 	}, nil
+}
+
+func encodeTraceContextJSON(m map[string]string) string {
+	if len(m) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func decodeTraceContextJSON(s string) map[string]string {
+	if s == "" || s == "null" {
+		return nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal([]byte(s), &m); err != nil || len(m) == 0 {
+		return nil
+	}
+	return m
 }
 
 type attemptJSON struct {

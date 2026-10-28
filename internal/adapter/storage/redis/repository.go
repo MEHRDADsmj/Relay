@@ -158,6 +158,7 @@ func (r *Repository) Create(ctx context.Context, job domain.Job) (domain.Job, bo
 		r.keys.Prefix(),
 		boolToRedis(job.CancelRequested),
 		optionalMsString(job.CancelledAt),
+		encodeTraceContextJSON(job.TraceContext),
 	).Result()
 	if err != nil {
 		return domain.Job{}, false, err

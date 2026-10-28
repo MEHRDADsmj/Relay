@@ -75,7 +75,7 @@ linters:
             - pkg: github.com/robfig/cron
               desc: app must not import robfig; use adapter/cron
             - pkg: go.opentelemetry.io/otel/sdk
-              desc: "app must not import otel sdk (API only: trace/attribute/codes)"
+              desc: "app must not import otel sdk (API only: otel/propagation/trace/attribute/codes)"
             - pkg: go.opentelemetry.io/otel/exporters
               desc: app must not import otel exporters
             - pkg: go.opentelemetry.io/contrib

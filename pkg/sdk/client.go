@@ -4,12 +4,18 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
+
+const sdkTracerName = "relay/sdk"
 
 // Client talks to a Relay server over HTTP or gRPC.
 type Client struct {
 	tr   transport
 	opts clientOptions
+	tp   trace.TracerProvider
 }
 
 // ClientOption configures a Client.
@@ -29,6 +35,15 @@ func WithHTTPClient(hc *http.Client) ClientOption {
 	}
 }
 
+// WithTracerProvider enables SDK consumer spans and otelhttp on the HTTP client.
+// Nil disables tracing (noop).
+func WithTracerProvider(tp trace.TracerProvider) ClientOption {
+	return func(c *Client) {
+		c.tp = tp
+		c.opts.tracerProvider = tp
+	}
+}
+
 // NewClient builds a Client for target.
 // Schemes: http:// / https:// → HTTP; grpc:// / grpcs:// → gRPC.
 // WithTransport overrides scheme detection.
@@ -44,6 +59,13 @@ func NewClient(target string, opts ...ClientOption) *Client {
 	}
 	c.tr = tr
 	return c
+}
+
+func (c *Client) tracer() trace.Tracer {
+	if c == nil || c.tp == nil {
+		return noop.NewTracerProvider().Tracer(sdkTracerName)
+	}
+	return c.tp.Tracer(sdkTracerName)
 }
 
 // Close releases transport resources (gRPC connections). Safe for HTTP.

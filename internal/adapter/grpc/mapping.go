@@ -37,6 +37,12 @@ func jobToProto(j domain.Job) *relayv1.Job {
 	if j.FinishedAt != nil {
 		out.FinishedAt = timestamppb.New(j.FinishedAt.UTC())
 	}
+	if len(j.TraceContext) > 0 {
+		out.TraceContext = make(map[string]string, len(j.TraceContext))
+		for k, v := range j.TraceContext {
+			out.TraceContext[k] = v
+		}
+	}
 	return out
 }
 

@@ -40,6 +40,8 @@ type Job struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	FinishedAt      *time.Time
+	// TraceContext holds W3C trace context (traceparent, tracestate) from enqueue.
+	TraceContext map[string]string
 }
 
 // NewJobParams holds caller-supplied fields for NewJob.

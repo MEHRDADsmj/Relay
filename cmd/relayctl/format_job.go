@@ -40,6 +40,9 @@ func jobDTO(j sdk.JobInfo) map[string]any {
 	if j.FinishedAt != nil {
 		m["finished_at"] = formatTimePtr(j.FinishedAt)
 	}
+	if len(j.TraceContext) > 0 {
+		m["trace_context"] = j.TraceContext
+	}
 	return m
 }
 

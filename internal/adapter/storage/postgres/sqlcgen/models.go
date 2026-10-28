@@ -41,6 +41,7 @@ type Job struct {
 	FinishedAt      *time.Time
 	CancelRequested bool
 	CancelledAt     *time.Time
+	TraceContext    []byte
 }
 
 type JobAttempt struct {

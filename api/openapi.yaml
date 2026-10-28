@@ -1302,6 +1302,12 @@ components:
           type: string
           format: date-time
           nullable: true
+        trace_context:
+          type: object
+          description: W3C trace context (traceparent, tracestate) captured at enqueue
+          additionalProperties:
+            type: string
+          nullable: true
     Problem:
       type: object
       required: [type, title, status]

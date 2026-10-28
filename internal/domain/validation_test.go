@@ -245,6 +245,42 @@ func TestValidateIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestNormalizeTraceContext(t *testing.T) {
+	t.Parallel()
+
+	parent := "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	got, err := NormalizeTraceContext(nil)
+	if err != nil || got != nil {
+		t.Fatalf("nil: got %v err %v", got, err)
+	}
+	got, err = NormalizeTraceContext(map[string]string{})
+	if err != nil || got != nil {
+		t.Fatalf("empty: got %v err %v", got, err)
+	}
+	got, err = NormalizeTraceContext(map[string]string{
+		TraceContextKeyParent: parent,
+		TraceContextKeyState:  "rojo=00f067aa0ba902b7",
+	})
+	if err != nil {
+		t.Fatalf("valid: %v", err)
+	}
+	if got[TraceContextKeyParent] != parent {
+		t.Fatalf("parent = %q", got[TraceContextKeyParent])
+	}
+	_, err = NormalizeTraceContext(map[string]string{"baggage": "x"})
+	assertValidationField(t, err, "trace_context")
+	_, err = NormalizeTraceContext(map[string]string{
+		TraceContextKeyParent: parent,
+		TraceContextKeyState:  "a",
+		"extra":               "b",
+	})
+	assertValidationField(t, err, "trace_context")
+	_, err = NormalizeTraceContext(map[string]string{
+		TraceContextKeyParent: strings.Repeat("a", MaxTraceContextValueBytes+1),
+	})
+	assertValidationField(t, err, "trace_context")
+}
+
 func TestNormalizeLeaseDuration(t *testing.T) {
 	t.Parallel()
 

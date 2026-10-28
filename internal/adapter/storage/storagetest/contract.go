@@ -42,6 +42,10 @@ func runJobContractPhase1(t *testing.T, newRepo func(t *testing.T) Backend) {
 		job.Priority = 5
 		job.IdempotencyKey = "key-1"
 		job.Payload = []byte(`{"n":1}`)
+		job.TraceContext = map[string]string{
+			domain.TraceContextKeyParent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+			domain.TraceContextKeyState:  "rojo=00f067aa0ba902b7",
+		}
 
 		stored, created, err := repo.Create(ctx, job)
 		require.NoError(t, err)
@@ -50,6 +54,7 @@ func runJobContractPhase1(t *testing.T, newRepo func(t *testing.T) Backend) {
 		got, err := repo.Get(ctx, stored.ID)
 		require.NoError(t, err)
 		assertJobsEqual(t, stored, got)
+		assert.Equal(t, job.TraceContext, got.TraceContext)
 	})
 
 	t.Run("2_get_unknown_not_found", func(t *testing.T) {
@@ -470,6 +475,7 @@ func assertJobsEqual(t *testing.T, want, got domain.Job) {
 	assert.Equal(t, want.LeaseOwner, got.LeaseOwner)
 	assert.Equal(t, want.IdempotencyKey, got.IdempotencyKey)
 	assert.Equal(t, want.LastError, got.LastError)
+	assert.Equal(t, want.TraceContext, got.TraceContext)
 	assertEqualTime(t, want.CreatedAt, got.CreatedAt)
 	assertEqualTime(t, want.UpdatedAt, got.UpdatedAt)
 	if want.LeaseExpiresAt == nil {

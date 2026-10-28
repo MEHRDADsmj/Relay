@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 
@@ -57,4 +59,26 @@ func attrJobID(id domain.JobID) attribute.KeyValue {
 
 func attrAttempt(n int) attribute.KeyValue {
 	return attribute.Int("relay.attempt", n)
+}
+
+// injectTraceContext serializes the active span context into a W3C carrier map.
+func injectTraceContext(ctx context.Context) map[string]string {
+	carrier := propagation.MapCarrier{}
+	otel.GetTextMapPropagator().Inject(ctx, carrier)
+	if len(carrier) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(carrier))
+	for k, v := range carrier {
+		switch k {
+		case domain.TraceContextKeyParent, domain.TraceContextKeyState:
+			if v != "" {
+				out[k] = v
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

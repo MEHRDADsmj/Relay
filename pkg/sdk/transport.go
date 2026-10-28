@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 )
 
@@ -58,10 +60,11 @@ type transport interface {
 }
 
 type clientOptions struct {
-	apiKey       string
-	httpClient   *http.Client
-	kind         TransportKind // 0 = detect from scheme
-	grpcDialOpts []grpc.DialOption
+	apiKey         string
+	httpClient     *http.Client
+	kind           TransportKind // 0 = detect from scheme
+	grpcDialOpts   []grpc.DialOption
+	tracerProvider trace.TracerProvider
 }
 
 // WithTransport forces HTTP or gRPC regardless of the target URL scheme.
@@ -121,6 +124,17 @@ func buildTransport(target string, opts clientOptions) (transport, error) {
 		hc := opts.httpClient
 		if hc == nil {
 			hc = http.DefaultClient
+		}
+		if opts.tracerProvider != nil {
+			baseTransport := hc.Transport
+			if baseTransport == nil {
+				baseTransport = http.DefaultTransport
+			}
+			wrapped := *hc
+			wrapped.Transport = otelhttp.NewTransport(baseTransport,
+				otelhttp.WithTracerProvider(opts.tracerProvider),
+			)
+			hc = &wrapped
 		}
 		return newHTTPTransport(base, opts.apiKey, hc), nil
 	case TransportGRPC:

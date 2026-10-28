@@ -17,6 +17,13 @@ const (
 	MaxIdempotencyKeyLen = 255
 	// MaxWorkerIDLen is the maximum worker ID length.
 	MaxWorkerIDLen = 128
+	// MaxTraceContextEntries is the max number of W3C trace context map entries.
+	MaxTraceContextEntries = 2
+	// MaxTraceContextValueBytes is the max size of each trace context value.
+	MaxTraceContextValueBytes = 512
+
+	TraceContextKeyParent = "traceparent"
+	TraceContextKeyState  = "tracestate"
 
 	DefaultPriority      = 0
 	DefaultMaxAttempts   = 10
@@ -120,6 +127,36 @@ func ValidateIdempotencyKey(key string) error {
 		return validationErrorf("idempotency_key", "must be printable ASCII")
 	}
 	return nil
+}
+
+// NormalizeTraceContext copies and validates W3C trace context (traceparent/tracestate).
+// Nil or empty input yields nil. Unknown keys are rejected.
+func NormalizeTraceContext(in map[string]string) (map[string]string, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	if len(in) > MaxTraceContextEntries {
+		return nil, validationErrorf("trace_context", "must have at most 2 entries")
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		switch k {
+		case TraceContextKeyParent, TraceContextKeyState:
+		default:
+			return nil, validationErrorf("trace_context", "key must be traceparent or tracestate")
+		}
+		if len(v) == 0 {
+			return nil, validationErrorf("trace_context", k+" must not be empty")
+		}
+		if len(v) > MaxTraceContextValueBytes {
+			return nil, validationErrorf("trace_context", k+" must be at most 512 bytes")
+		}
+		if !isPrintableASCII(v) {
+			return nil, validationErrorf("trace_context", k+" must be printable ASCII")
+		}
+		out[k] = v
+	}
+	return out, nil
 }
 
 // NormalizeLeaseDuration defaults 0 to 30s and validates 5s..15m.

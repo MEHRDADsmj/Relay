@@ -21,7 +21,7 @@ SET
     updated_at = $1::timestamptz
 WHERE id = $2
   AND status = 'pending'
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context
 `
 
 type CancelPendingJobParams struct {
@@ -51,6 +51,7 @@ func (q *Queries) CancelPendingJob(ctx context.Context, arg CancelPendingJobPara
 		&i.FinishedAt,
 		&i.CancelRequested,
 		&i.CancelledAt,
+		&i.TraceContext,
 	)
 	return i, err
 }
@@ -62,7 +63,7 @@ SET
     updated_at = $1::timestamptz
 WHERE id = $2
   AND status = 'running'
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context
 `
 
 type CancelRunningJobParams struct {
@@ -92,6 +93,7 @@ func (q *Queries) CancelRunningJob(ctx context.Context, arg CancelRunningJobPara
 		&i.FinishedAt,
 		&i.CancelRequested,
 		&i.CancelledAt,
+		&i.TraceContext,
 	)
 	return i, err
 }
@@ -119,7 +121,7 @@ WHERE j.id IN (
     FOR UPDATE SKIP LOCKED
     LIMIT $5
 )
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context
 `
 
 type ClaimJobsParams struct {
@@ -164,6 +166,7 @@ func (q *Queries) ClaimJobs(ctx context.Context, arg ClaimJobsParams) ([]Job, er
 			&i.FinishedAt,
 			&i.CancelRequested,
 			&i.CancelledAt,
+			&i.TraceContext,
 		); err != nil {
 			return nil, err
 		}
@@ -190,7 +193,7 @@ WHERE id = $2
   AND lease_owner = $3
   AND lease_expires_at > $1::timestamptz
   AND cancel_requested = true
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context
 `
 
 type CompleteJobCancelledParams struct {
@@ -221,6 +224,7 @@ func (q *Queries) CompleteJobCancelled(ctx context.Context, arg CompleteJobCance
 		&i.FinishedAt,
 		&i.CancelRequested,
 		&i.CancelledAt,
+		&i.TraceContext,
 	)
 	return i, err
 }
@@ -239,7 +243,7 @@ WHERE id = $2
   AND lease_owner = $3
   AND lease_expires_at > $1::timestamptz
   AND cancel_requested = false
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context
 `
 
 type CompleteJobSucceededParams struct {
@@ -270,6 +274,7 @@ func (q *Queries) CompleteJobSucceeded(ctx context.Context, arg CompleteJobSucce
 		&i.FinishedAt,
 		&i.CancelRequested,
 		&i.CancelledAt,
+		&i.TraceContext,
 	)
 	return i, err
 }
@@ -293,13 +298,14 @@ INSERT INTO jobs (
     cancelled_at,
     created_at,
     updated_at,
-    finished_at
+    finished_at,
+    trace_context
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
 )
 ON CONFLICT (queue, idempotency_key) WHERE idempotency_key IS NOT NULL
 DO NOTHING
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context
 `
 
 type CreateJobParams struct {
@@ -321,6 +327,7 @@ type CreateJobParams struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	FinishedAt      *time.Time
+	TraceContext    []byte
 }
 
 func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, error) {
@@ -343,6 +350,7 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, erro
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.FinishedAt,
+		arg.TraceContext,
 	)
 	var i Job
 	err := row.Scan(
@@ -364,6 +372,7 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, erro
 		&i.FinishedAt,
 		&i.CancelRequested,
 		&i.CancelledAt,
+		&i.TraceContext,
 	)
 	return i, err
 }
@@ -387,7 +396,7 @@ WHERE id = $3
   AND status = 'running'
   AND lease_owner = $4
   AND lease_expires_at > $2::timestamptz
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context
 `
 
 type ExtendLeaseParams struct {
@@ -424,6 +433,7 @@ func (q *Queries) ExtendLease(ctx context.Context, arg ExtendLeaseParams) (Job, 
 		&i.FinishedAt,
 		&i.CancelRequested,
 		&i.CancelledAt,
+		&i.TraceContext,
 	)
 	return i, err
 }
@@ -444,7 +454,7 @@ WHERE id = $3
   AND lease_owner = $4
   AND lease_expires_at > $1::timestamptz
   AND cancel_requested = true
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context
 `
 
 type FailJobCancelledParams struct {
@@ -481,6 +491,7 @@ func (q *Queries) FailJobCancelled(ctx context.Context, arg FailJobCancelledPara
 		&i.FinishedAt,
 		&i.CancelRequested,
 		&i.CancelledAt,
+		&i.TraceContext,
 	)
 	return i, err
 }
@@ -499,7 +510,7 @@ WHERE id = $3
   AND lease_owner = $4
   AND lease_expires_at > $1::timestamptz
   AND cancel_requested = false
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context
 `
 
 type FailJobDeadParams struct {
@@ -536,6 +547,7 @@ func (q *Queries) FailJobDead(ctx context.Context, arg FailJobDeadParams) (Job, 
 		&i.FinishedAt,
 		&i.CancelRequested,
 		&i.CancelledAt,
+		&i.TraceContext,
 	)
 	return i, err
 }
@@ -554,7 +566,7 @@ WHERE id = $4
   AND lease_owner = $5
   AND lease_expires_at > $3::timestamptz
   AND cancel_requested = false
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context
 `
 
 type FailJobPendingParams struct {
@@ -593,12 +605,13 @@ func (q *Queries) FailJobPending(ctx context.Context, arg FailJobPendingParams) 
 		&i.FinishedAt,
 		&i.CancelRequested,
 		&i.CancelledAt,
+		&i.TraceContext,
 	)
 	return i, err
 }
 
 const getJob = `-- name: GetJob :one
-SELECT id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at FROM jobs
+SELECT id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context FROM jobs
 WHERE id = $1
 `
 
@@ -624,12 +637,13 @@ func (q *Queries) GetJob(ctx context.Context, id uuid.UUID) (Job, error) {
 		&i.FinishedAt,
 		&i.CancelRequested,
 		&i.CancelledAt,
+		&i.TraceContext,
 	)
 	return i, err
 }
 
 const getJobByIdempotencyKey = `-- name: GetJobByIdempotencyKey :one
-SELECT id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at FROM jobs
+SELECT id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context FROM jobs
 WHERE queue = $1 AND idempotency_key = $2
 `
 
@@ -660,12 +674,13 @@ func (q *Queries) GetJobByIdempotencyKey(ctx context.Context, arg GetJobByIdempo
 		&i.FinishedAt,
 		&i.CancelRequested,
 		&i.CancelledAt,
+		&i.TraceContext,
 	)
 	return i, err
 }
 
 const getJobForUpdate = `-- name: GetJobForUpdate :one
-SELECT id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at FROM jobs
+SELECT id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context FROM jobs
 WHERE id = $1
 FOR UPDATE
 `
@@ -692,12 +707,13 @@ func (q *Queries) GetJobForUpdate(ctx context.Context, id uuid.UUID) (Job, error
 		&i.FinishedAt,
 		&i.CancelRequested,
 		&i.CancelledAt,
+		&i.TraceContext,
 	)
 	return i, err
 }
 
 const listJobsByStatus = `-- name: ListJobsByStatus :many
-SELECT id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at FROM jobs
+SELECT id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context FROM jobs
 WHERE queue = $1
   AND status = $2
   AND (
@@ -752,6 +768,7 @@ func (q *Queries) ListJobsByStatus(ctx context.Context, arg ListJobsByStatusPara
 			&i.FinishedAt,
 			&i.CancelRequested,
 			&i.CancelledAt,
+			&i.TraceContext,
 		); err != nil {
 			return nil, err
 		}
@@ -776,7 +793,7 @@ WHERE queue = $2
   AND status = 'running'
   AND lease_expires_at <= $1::timestamptz
   AND attempts >= max_attempts
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context
 `
 
 type MarkExpiredLeasesDeadParams struct {
@@ -812,6 +829,7 @@ func (q *Queries) MarkExpiredLeasesDead(ctx context.Context, arg MarkExpiredLeas
 			&i.FinishedAt,
 			&i.CancelRequested,
 			&i.CancelledAt,
+			&i.TraceContext,
 		); err != nil {
 			return nil, err
 		}
@@ -871,7 +889,7 @@ WHERE id = $2
   AND status = 'running'
   AND lease_expires_at <= $1::timestamptz
   AND attempts >= max_attempts
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context
 `
 
 type ReapExpiredDeadParams struct {
@@ -901,6 +919,7 @@ func (q *Queries) ReapExpiredDead(ctx context.Context, arg ReapExpiredDeadParams
 		&i.FinishedAt,
 		&i.CancelRequested,
 		&i.CancelledAt,
+		&i.TraceContext,
 	)
 	return i, err
 }
@@ -917,7 +936,7 @@ WHERE id = $2
   AND status = 'running'
   AND lease_expires_at <= $1::timestamptz
   AND attempts < max_attempts
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context
 `
 
 type ReapExpiredRequeueParams struct {
@@ -947,6 +966,7 @@ func (q *Queries) ReapExpiredRequeue(ctx context.Context, arg ReapExpiredRequeue
 		&i.FinishedAt,
 		&i.CancelRequested,
 		&i.CancelledAt,
+		&i.TraceContext,
 	)
 	return i, err
 }
@@ -998,7 +1018,7 @@ WHERE id = $2
   AND status = 'running'
   AND lease_owner = $3
   AND lease_expires_at > $1::timestamptz
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context
 `
 
 type ReleaseJobParams struct {
@@ -1029,6 +1049,7 @@ func (q *Queries) ReleaseJob(ctx context.Context, arg ReleaseJobParams) (Job, er
 		&i.FinishedAt,
 		&i.CancelRequested,
 		&i.CancelledAt,
+		&i.TraceContext,
 	)
 	return i, err
 }
@@ -1047,7 +1068,7 @@ SET
     updated_at = $1::timestamptz
 WHERE id = $2
   AND status IN ('dead', 'cancelled')
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context
 `
 
 type RetryJobParams struct {
@@ -1077,6 +1098,7 @@ func (q *Queries) RetryJob(ctx context.Context, arg RetryJobParams) (Job, error)
 		&i.FinishedAt,
 		&i.CancelRequested,
 		&i.CancelledAt,
+		&i.TraceContext,
 	)
 	return i, err
 }

@@ -69,6 +69,12 @@ func cloneJob(j domain.Job) domain.Job {
 		t := *j.CancelledAt
 		out.CancelledAt = &t
 	}
+	if j.TraceContext != nil {
+		out.TraceContext = make(map[string]string, len(j.TraceContext))
+		for k, v := range j.TraceContext {
+			out.TraceContext[k] = v
+		}
+	}
 	return out
 }
 

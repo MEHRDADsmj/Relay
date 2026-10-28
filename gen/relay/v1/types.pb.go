@@ -218,8 +218,10 @@ type Job struct {
 	CreatedAt       *timestamppb.Timestamp `protobuf:"bytes,16,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt       *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
 	FinishedAt      *timestamppb.Timestamp `protobuf:"bytes,18,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// W3C trace context (traceparent, tracestate) captured at enqueue.
+	TraceContext  map[string]string `protobuf:"bytes,19,rep,name=trace_context,json=traceContext,proto3" json:"trace_context,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Job) Reset() {
@@ -374,6 +376,13 @@ func (x *Job) GetUpdatedAt() *timestamppb.Timestamp {
 func (x *Job) GetFinishedAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.FinishedAt
+	}
+	return nil
+}
+
+func (x *Job) GetTraceContext() map[string]string {
+	if x != nil {
+		return x.TraceContext
 	}
 	return nil
 }
@@ -911,7 +920,7 @@ var File_relay_v1_types_proto protoreflect.FileDescriptor
 
 const file_relay_v1_types_proto_rawDesc = "" +
 	"\n" +
-	"\x14relay/v1/types.proto\x12\brelay.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe0\x05\n" +
+	"\x14relay/v1/types.proto\x12\brelay.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe7\x06\n" +
 	"\x03Job\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05queue\x18\x02 \x01(\tR\x05queue\x12\x12\n" +
@@ -936,7 +945,11 @@ const file_relay_v1_types_proto_rawDesc = "" +
 	"\n" +
 	"updated_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12;\n" +
 	"\vfinished_at\x18\x12 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"finishedAt\"\x97\x02\n" +
+	"finishedAt\x12D\n" +
+	"\rtrace_context\x18\x13 \x03(\v2\x1f.relay.v1.Job.TraceContextEntryR\ftraceContext\x1a?\n" +
+	"\x11TraceContextEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x97\x02\n" +
 	"\aAttempt\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x16\n" +
 	"\x06number\x18\x02 \x01(\x05R\x06number\x12\x1b\n" +
@@ -1031,7 +1044,7 @@ func file_relay_v1_types_proto_rawDescGZIP() []byte {
 }
 
 var file_relay_v1_types_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_relay_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_relay_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_relay_v1_types_proto_goTypes = []any{
 	(JobStatus)(0),                // 0: relay.v1.JobStatus
 	(AttemptOutcome)(0),           // 1: relay.v1.AttemptOutcome
@@ -1042,35 +1055,37 @@ var file_relay_v1_types_proto_goTypes = []any{
 	(*QueueStats)(nil),            // 6: relay.v1.QueueStats
 	(*Schedule)(nil),              // 7: relay.v1.Schedule
 	(*APIKey)(nil),                // 8: relay.v1.APIKey
-	(*timestamppb.Timestamp)(nil), // 9: google.protobuf.Timestamp
+	nil,                           // 9: relay.v1.Job.TraceContextEntry
+	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
 }
 var file_relay_v1_types_proto_depIdxs = []int32{
 	0,  // 0: relay.v1.Job.status:type_name -> relay.v1.JobStatus
-	9,  // 1: relay.v1.Job.run_at:type_name -> google.protobuf.Timestamp
-	9,  // 2: relay.v1.Job.lease_expires_at:type_name -> google.protobuf.Timestamp
-	9,  // 3: relay.v1.Job.cancelled_at:type_name -> google.protobuf.Timestamp
-	9,  // 4: relay.v1.Job.created_at:type_name -> google.protobuf.Timestamp
-	9,  // 5: relay.v1.Job.updated_at:type_name -> google.protobuf.Timestamp
-	9,  // 6: relay.v1.Job.finished_at:type_name -> google.protobuf.Timestamp
-	9,  // 7: relay.v1.Attempt.started_at:type_name -> google.protobuf.Timestamp
-	9,  // 8: relay.v1.Attempt.finished_at:type_name -> google.protobuf.Timestamp
-	1,  // 9: relay.v1.Attempt.outcome:type_name -> relay.v1.AttemptOutcome
-	9,  // 10: relay.v1.Queue.created_at:type_name -> google.protobuf.Timestamp
-	9,  // 11: relay.v1.Queue.updated_at:type_name -> google.protobuf.Timestamp
-	9,  // 12: relay.v1.Schedule.next_run_at:type_name -> google.protobuf.Timestamp
-	9,  // 13: relay.v1.Schedule.last_run_at:type_name -> google.protobuf.Timestamp
-	9,  // 14: relay.v1.Schedule.created_at:type_name -> google.protobuf.Timestamp
-	9,  // 15: relay.v1.Schedule.updated_at:type_name -> google.protobuf.Timestamp
-	2,  // 16: relay.v1.APIKey.scopes:type_name -> relay.v1.Scope
-	9,  // 17: relay.v1.APIKey.created_at:type_name -> google.protobuf.Timestamp
-	9,  // 18: relay.v1.APIKey.last_used_at:type_name -> google.protobuf.Timestamp
-	9,  // 19: relay.v1.APIKey.expires_at:type_name -> google.protobuf.Timestamp
-	9,  // 20: relay.v1.APIKey.revoked_at:type_name -> google.protobuf.Timestamp
-	21, // [21:21] is the sub-list for method output_type
-	21, // [21:21] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	10, // 1: relay.v1.Job.run_at:type_name -> google.protobuf.Timestamp
+	10, // 2: relay.v1.Job.lease_expires_at:type_name -> google.protobuf.Timestamp
+	10, // 3: relay.v1.Job.cancelled_at:type_name -> google.protobuf.Timestamp
+	10, // 4: relay.v1.Job.created_at:type_name -> google.protobuf.Timestamp
+	10, // 5: relay.v1.Job.updated_at:type_name -> google.protobuf.Timestamp
+	10, // 6: relay.v1.Job.finished_at:type_name -> google.protobuf.Timestamp
+	9,  // 7: relay.v1.Job.trace_context:type_name -> relay.v1.Job.TraceContextEntry
+	10, // 8: relay.v1.Attempt.started_at:type_name -> google.protobuf.Timestamp
+	10, // 9: relay.v1.Attempt.finished_at:type_name -> google.protobuf.Timestamp
+	1,  // 10: relay.v1.Attempt.outcome:type_name -> relay.v1.AttemptOutcome
+	10, // 11: relay.v1.Queue.created_at:type_name -> google.protobuf.Timestamp
+	10, // 12: relay.v1.Queue.updated_at:type_name -> google.protobuf.Timestamp
+	10, // 13: relay.v1.Schedule.next_run_at:type_name -> google.protobuf.Timestamp
+	10, // 14: relay.v1.Schedule.last_run_at:type_name -> google.protobuf.Timestamp
+	10, // 15: relay.v1.Schedule.created_at:type_name -> google.protobuf.Timestamp
+	10, // 16: relay.v1.Schedule.updated_at:type_name -> google.protobuf.Timestamp
+	2,  // 17: relay.v1.APIKey.scopes:type_name -> relay.v1.Scope
+	10, // 18: relay.v1.APIKey.created_at:type_name -> google.protobuf.Timestamp
+	10, // 19: relay.v1.APIKey.last_used_at:type_name -> google.protobuf.Timestamp
+	10, // 20: relay.v1.APIKey.expires_at:type_name -> google.protobuf.Timestamp
+	10, // 21: relay.v1.APIKey.revoked_at:type_name -> google.protobuf.Timestamp
+	22, // [22:22] is the sub-list for method output_type
+	22, // [22:22] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_relay_v1_types_proto_init() }
@@ -1084,7 +1099,7 @@ func file_relay_v1_types_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_relay_v1_types_proto_rawDesc), len(file_relay_v1_types_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

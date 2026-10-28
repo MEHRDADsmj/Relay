@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"time"
@@ -31,6 +32,7 @@ func toDomain(j sqlcgen.Job) domain.Job {
 		CreatedAt:       j.CreatedAt.UTC(),
 		UpdatedAt:       j.UpdatedAt.UTC(),
 		FinishedAt:      utcPtr(j.FinishedAt),
+		TraceContext:    decodeTraceContext(j.TraceContext),
 	}
 }
 
@@ -176,7 +178,30 @@ func toCreateParams(job domain.Job) sqlcgen.CreateJobParams {
 		CreatedAt:       job.CreatedAt.UTC(),
 		UpdatedAt:       job.UpdatedAt.UTC(),
 		FinishedAt:      utcPtr(job.FinishedAt),
+		TraceContext:    encodeTraceContext(job.TraceContext),
 	}
+}
+
+func encodeTraceContext(m map[string]string) []byte {
+	if len(m) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+func decodeTraceContext(raw []byte) map[string]string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal(raw, &m); err != nil || len(m) == 0 {
+		return nil
+	}
+	return m
 }
 
 func nullStr(s string) *string {

@@ -6,7 +6,7 @@
 -- ARGV: id, queue, type, payload, status, priority, run_at_ms, attempts,
 --       max_attempts, lease_owner, lease_expires_at, idempotency_key,
 --       last_error, created_at_ms, updated_at_ms, finished_at, now_ms, ready_score,
---       prefix, cancel_requested, cancelled_at
+--       prefix, cancel_requested, cancelled_at, trace_context_json
 -- Returns: { created (0|1), job_id }
 
 local idem_key = KEYS[4]
@@ -45,7 +45,8 @@ redis.call('HSET', KEYS[1],
   'updated_at', ARGV[15],
   'finished_at', ARGV[16],
   'cancel_requested', ARGV[20],
-  'cancelled_at', ARGV[21]
+  'cancelled_at', ARGV[21],
+  'trace_context', ARGV[22]
 )
 store_idem_redis_key(KEYS[1], idem_key)
 

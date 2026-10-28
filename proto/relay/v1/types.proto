@@ -56,6 +56,8 @@ message Job {
   google.protobuf.Timestamp created_at = 16;
   google.protobuf.Timestamp updated_at = 17;
   google.protobuf.Timestamp finished_at = 18;
+  // W3C trace context (traceparent, tracestate) captured at enqueue.
+  map<string, string> trace_context = 19;
 }
 
 // Attempt is one execution attempt of a job.

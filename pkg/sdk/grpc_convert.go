@@ -55,6 +55,12 @@ func jobFromProto(j *relayv1.Job) apiJob {
 		t := ts.AsTime()
 		out.FinishedAt = &t
 	}
+	if tc := j.GetTraceContext(); len(tc) > 0 {
+		out.TraceContext = make(map[string]string, len(tc))
+		for k, v := range tc {
+			out.TraceContext[k] = v
+		}
+	}
 	return out
 }
 
