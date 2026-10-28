@@ -65,3 +65,5 @@ out/
 *.vsix
 # Superpowers SDD workspace
 .superpowers/
+
+.serena/
