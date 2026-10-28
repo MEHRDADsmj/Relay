@@ -34,6 +34,8 @@ services:
       dockerfile: deploy/docker/Dockerfile
       args:
         CMD: relay-server
+        # Override when proxy.golang.org returns 403, e.g. COMPOSE_GOPROXY=https://goproxy.io,direct
+        GOPROXY: ${COMPOSE_GOPROXY:-https://proxy.golang.org,direct}
     ports:
       - "7420:7420"
     environment:
@@ -58,6 +60,41 @@ services:
       timeout: 3s
       retries: 12
       start_period: 15s
+
+  example-worker:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        CMD: example-worker
+        GOPROXY: ${COMPOSE_GOPROXY:-https://proxy.golang.org,direct}
+    environment:
+      RELAY_URL: http://relay-server:7420
+      RELAY_API_KEY: ${RELAY_API_KEY:-}
+      RELAY_QUEUE: ${RELAY_QUEUE:-default}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-10}
+    depends_on:
+      relay-server:
+        condition: service_healthy
+    restart: unless-stopped
+
+  example-producer:
+    profiles: ["demo"]
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        CMD: example-producer
+        GOPROXY: ${COMPOSE_GOPROXY:-https://proxy.golang.org,direct}
+    environment:
+      RELAY_URL: http://relay-server:7420
+      RELAY_API_KEY: ${RELAY_API_KEY:-}
+      RELAY_QUEUE: ${RELAY_QUEUE:-default}
+    depends_on:
+      relay-server:
+        condition: service_healthy
+      example-worker:
+        condition: service_started
 
 volumes:
   relay_pgdata:

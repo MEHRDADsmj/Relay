@@ -11,6 +11,12 @@ endif
 GO ?= go
 GOLANGCI_LINT ?= golangci-lint
 
+# Docker build-arg for module downloads. Default goproxy.io for hosts where
+# proxy.golang.org returns 403. CI / raw `docker compose` without this var keep
+# the Dockerfile default (proxy.golang.org). Override:
+#   make up COMPOSE_GOPROXY=https://proxy.golang.org,direct
+COMPOSE_GOPROXY ?= https://goproxy.io,direct
+
 .DEFAULT_GOAL := help
 
 .PHONY: help tools generate lint test test-integration test-e2e cover build up down up-redis deps demo check-generated
@@ -79,19 +85,19 @@ build: ## build server and examples
 	$(GO) build -o bin/example-producer$(EXE) ./examples/producer
 
 up: ## docker compose up
-	docker compose up -d --build
+	COMPOSE_GOPROXY=$(COMPOSE_GOPROXY) docker compose up -d --build --scale example-worker=2
 
 down: ## docker compose down
 	docker compose down -v
 
 up-redis: ## compose with redis storage
-	RELAY_STORAGE=redis docker compose up -d --build
+	COMPOSE_GOPROXY=$(COMPOSE_GOPROXY) RELAY_STORAGE=redis docker compose up -d --build --scale example-worker=2
 
 deps: ## start postgres + redis only
 	docker compose up -d postgres redis
 
 demo: up ## run demo producer
-	docker compose --profile demo run --rm example-producer
+	COMPOSE_GOPROXY=$(COMPOSE_GOPROXY) docker compose --profile demo run --rm example-producer
 
 check-generated: generate ## fail if generated files drift
 	@git diff --exit-code -- internal/adapter/storage/postgres/sqlcgen internal/adapter/http/oapi || ( \
