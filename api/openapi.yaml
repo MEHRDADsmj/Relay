@@ -1,8 +1,16 @@
 openapi: 3.0.3
 info:
   title: Relay API
-  description: HTTP API for the Relay job queue.
-  version: 0.1.0
+  description: |
+    HTTP API for the Relay job queue.
+
+    Conflict (409) problem `type` URIs:
+    - `https://relay.dev/problems/lease-lost` — worker lost the lease
+    - `https://relay.dev/problems/invalid-transition` — status does not allow the operation
+
+    Long-poll leases use `wait_seconds` (0..30). The server `WriteTimeout` is 45s so it
+    exceeds the maximum wait.
+  version: 0.2.0
 servers:
   - url: /
 paths:
@@ -97,10 +105,32 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /v1/jobs/{id}/attempts:
+    get:
+      operationId: listJobAttempts
+      summary: List attempt history for a job
+      tags: [jobs]
+      parameters:
+        - $ref: "#/components/parameters/JobID"
+      responses:
+        "200":
+          description: Attempt history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttemptsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /v1/queues/{queue}/leases:
     post:
       operationId: leaseJobs
-      summary: Lease jobs from a queue
+      summary: Lease jobs from a queue (optional long-poll)
       tags: [leases]
       parameters:
         - name: queue
@@ -117,7 +147,7 @@ paths:
               $ref: "#/components/schemas/LeaseRequest"
       responses:
         "200":
-          description: Leased jobs (possibly empty)
+          description: Leased jobs (possibly empty after wait)
           content:
             application/json:
               schema:
@@ -145,7 +175,7 @@ paths:
               $ref: "#/components/schemas/HeartbeatRequest"
       responses:
         "200":
-          description: Lease extended
+          description: Lease extended (includes cancel_requested)
           content:
             application/json:
               schema:
@@ -209,7 +239,7 @@ paths:
               $ref: "#/components/schemas/FailRequest"
       responses:
         "200":
-          description: Failure recorded (pending retry or dead)
+          description: Failure recorded (pending retry, dead, or cancelled)
           content:
             application/json:
               schema:
@@ -226,6 +256,236 @@ paths:
           $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalError"
+  /v1/jobs/{id}/release:
+    post:
+      operationId: releaseJob
+      summary: Voluntarily release a lease (does not consume an attempt)
+      tags: [jobs]
+      parameters:
+        - $ref: "#/components/parameters/JobID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReleaseRequest"
+      responses:
+        "200":
+          description: Job returned to pending
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /v1/jobs/{id}/cancel:
+    post:
+      operationId: cancelJob
+      summary: Cancel a pending job or request cancel on a running job
+      tags: [jobs]
+      parameters:
+        - $ref: "#/components/parameters/JobID"
+      responses:
+        "200":
+          description: Job cancelled or cancel requested
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /v1/jobs/{id}/retry:
+    post:
+      operationId: retryJob
+      summary: Retry a dead or cancelled job
+      tags: [jobs]
+      parameters:
+        - $ref: "#/components/parameters/JobID"
+      responses:
+        "200":
+          description: Job requeued as pending
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /v1/queues:
+    get:
+      operationId: listQueues
+      summary: List registered queues
+      tags: [queues]
+      responses:
+        "200":
+          description: Queue list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueuesResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /v1/queues/{queue}:
+    get:
+      operationId: getQueueStats
+      summary: Queue statistics
+      tags: [queues]
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+      responses:
+        "200":
+          description: Stats for the queue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueStats"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /v1/queues/{queue}/pause:
+    post:
+      operationId: pauseQueue
+      summary: Pause a queue (claims return empty)
+      tags: [queues]
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+      responses:
+        "200":
+          description: Queue paused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Queue"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /v1/queues/{queue}/resume:
+    post:
+      operationId: resumeQueue
+      summary: Resume a paused queue
+      tags: [queues]
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+      responses:
+        "200":
+          description: Queue resumed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Queue"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /v1/queues/{queue}/jobs:
+    get:
+      operationId: listQueueJobs
+      summary: List jobs in a queue by status (keyset pagination)
+      tags: [queues]
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+        - name: status
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/JobStatus"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            description: Opaque keyset cursor from a previous page
+      responses:
+        "200":
+          description: Page of jobs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /v1/queues/{queue}/dead/retry:
+    post:
+      operationId: retryDeadJobs
+      summary: Bulk-retry dead jobs in a queue
+      tags: [queues]
+      parameters:
+        - $ref: "#/components/parameters/QueueName"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RetryDeadRequest"
+      responses:
+        "200":
+          description: Number of jobs retried
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetryDeadResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   parameters:
     JobID:
@@ -235,6 +495,13 @@ components:
       schema:
         type: string
         format: uuid
+    QueueName:
+      name: queue
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
   schemas:
     HealthResponse:
       type: object
@@ -291,6 +558,11 @@ components:
           minimum: 5
           maximum: 900
           description: Lease duration in seconds (default 30)
+        wait_seconds:
+          type: integer
+          minimum: 0
+          maximum: 30
+          description: Long-poll wait in seconds (default 0 = return immediately)
     HeartbeatRequest:
       type: object
       required: [worker_id]
@@ -321,6 +593,31 @@ components:
           maxLength: 128
         error:
           type: string
+        permanent:
+          type: boolean
+          description: When true, mark the job dead without retry
+    ReleaseRequest:
+      type: object
+      required: [worker_id]
+      properties:
+        worker_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+    RetryDeadRequest:
+      type: object
+      properties:
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          description: Max jobs to retry (default 1000)
+    RetryDeadResponse:
+      type: object
+      required: [retried]
+      properties:
+        retried:
+          type: integer
     LeaseResponse:
       type: object
       required: [jobs]
@@ -329,6 +626,112 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Job"
+    AttemptsResponse:
+      type: object
+      required: [attempts]
+      properties:
+        attempts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Attempt"
+    Attempt:
+      type: object
+      required: [job_id, number, worker_id, started_at, outcome]
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        number:
+          type: integer
+        worker_id:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        outcome:
+          type: string
+          enum: [running, succeeded, failed, expired, released, cancelled]
+        error:
+          type: string
+    QueuesResponse:
+      type: object
+      required: [queues]
+      properties:
+        queues:
+          type: array
+          items:
+            $ref: "#/components/schemas/Queue"
+    Queue:
+      type: object
+      required: [name, paused, created_at, updated_at]
+      properties:
+        name:
+          type: string
+        paused:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    QueueStats:
+      type: object
+      required:
+        - queue
+        - paused
+        - pending
+        - scheduled
+        - running
+        - succeeded
+        - dead
+        - cancelled
+        - oldest_pending_age_seconds
+      properties:
+        queue:
+          type: string
+        paused:
+          type: boolean
+        pending:
+          type: integer
+          format: int64
+        scheduled:
+          type: integer
+          format: int64
+        running:
+          type: integer
+          format: int64
+        succeeded:
+          type: integer
+          format: int64
+        dead:
+          type: integer
+          format: int64
+        cancelled:
+          type: integer
+          format: int64
+        oldest_pending_age_seconds:
+          type: integer
+          format: int64
+          description: Age in seconds of oldest due pending job (0 if none)
+    JobPage:
+      type: object
+      required: [jobs, next_cursor]
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/Job"
+        next_cursor:
+          type: string
+          description: Empty string when this is the last page
+    JobStatus:
+      type: string
+      enum: [pending, running, succeeded, dead, cancelled]
     Job:
       type: object
       required:
@@ -341,6 +744,7 @@ components:
         - run_at
         - attempts
         - max_attempts
+        - cancel_requested
         - created_at
         - updated_at
       properties:
@@ -358,8 +762,7 @@ components:
             name: jraw
             path: encoding/json
         status:
-          type: string
-          enum: [pending, running, succeeded, dead]
+          $ref: "#/components/schemas/JobStatus"
         priority:
           type: integer
         run_at:
@@ -379,6 +782,12 @@ components:
           type: string
         last_error:
           type: string
+        cancel_requested:
+          type: boolean
+        cancelled_at:
+          type: string
+          format: date-time
+          nullable: true
         created_at:
           type: string
           format: date-time
@@ -396,6 +805,10 @@ components:
         type:
           type: string
           format: uri
+          description: |
+            Problem type URI. Conflict responses use
+            https://relay.dev/problems/lease-lost or
+            https://relay.dev/problems/invalid-transition.
         title:
           type: string
         status:
@@ -436,7 +849,10 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
     Conflict:
-      description: Lease lost or conflict
+      description: |
+        Lease lost or invalid state transition.
+        Problem type is https://relay.dev/problems/lease-lost or
+        https://relay.dev/problems/invalid-transition.
       content:
         application/problem+json:
           schema:

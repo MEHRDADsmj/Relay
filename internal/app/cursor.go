@@ -3,7 +3,6 @@ package app
 import (
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,25 +33,25 @@ func EncodeCursor(t time.Time, id domain.JobID) (string, error) {
 // DecodeCursor parses an opaque cursor into updated_at time and job id.
 func DecodeCursor(cursor string) (time.Time, domain.JobID, error) {
 	if cursor == "" {
-		return time.Time{}, uuid.Nil, fmt.Errorf("%w: cursor: required", domain.ErrValidation)
+		return time.Time{}, uuid.Nil, &domain.ValidationError{Field: "cursor", Message: "required"}
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(cursor)
 	if err != nil {
-		return time.Time{}, uuid.Nil, fmt.Errorf("%w: cursor: invalid encoding", domain.ErrValidation)
+		return time.Time{}, uuid.Nil, &domain.ValidationError{Field: "cursor", Message: "invalid encoding"}
 	}
 	var p cursorPayload
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return time.Time{}, uuid.Nil, fmt.Errorf("%w: cursor: invalid json", domain.ErrValidation)
+		return time.Time{}, uuid.Nil, &domain.ValidationError{Field: "cursor", Message: "invalid json"}
 	}
 	if p.T == nil || *p.T == 0 {
-		return time.Time{}, uuid.Nil, fmt.Errorf("%w: cursor: invalid t", domain.ErrValidation)
+		return time.Time{}, uuid.Nil, &domain.ValidationError{Field: "cursor", Message: "invalid t"}
 	}
 	if p.ID == "" {
-		return time.Time{}, uuid.Nil, fmt.Errorf("%w: cursor: missing id", domain.ErrValidation)
+		return time.Time{}, uuid.Nil, &domain.ValidationError{Field: "cursor", Message: "missing id"}
 	}
 	id, err := uuid.Parse(p.ID)
 	if err != nil || id == uuid.Nil {
-		return time.Time{}, uuid.Nil, fmt.Errorf("%w: cursor: invalid id", domain.ErrValidation)
+		return time.Time{}, uuid.Nil, &domain.ValidationError{Field: "cursor", Message: "invalid id"}
 	}
 	return time.UnixMilli(*p.T).UTC(), id, nil
 }

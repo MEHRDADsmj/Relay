@@ -25,13 +25,43 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for AttemptOutcome.
+const (
+	AttemptOutcomeCancelled AttemptOutcome = "cancelled"
+	AttemptOutcomeExpired   AttemptOutcome = "expired"
+	AttemptOutcomeFailed    AttemptOutcome = "failed"
+	AttemptOutcomeReleased  AttemptOutcome = "released"
+	AttemptOutcomeRunning   AttemptOutcome = "running"
+	AttemptOutcomeSucceeded AttemptOutcome = "succeeded"
+)
+
 // Defines values for JobStatus.
 const (
-	Dead      JobStatus = "dead"
-	Pending   JobStatus = "pending"
-	Running   JobStatus = "running"
-	Succeeded JobStatus = "succeeded"
+	JobStatusCancelled JobStatus = "cancelled"
+	JobStatusDead      JobStatus = "dead"
+	JobStatusPending   JobStatus = "pending"
+	JobStatusRunning   JobStatus = "running"
+	JobStatusSucceeded JobStatus = "succeeded"
 )
+
+// Attempt defines model for Attempt.
+type Attempt struct {
+	Error      *string            `json:"error,omitempty"`
+	FinishedAt *time.Time         `json:"finished_at"`
+	JobId      openapi_types.UUID `json:"job_id"`
+	Number     int                `json:"number"`
+	Outcome    AttemptOutcome     `json:"outcome"`
+	StartedAt  time.Time          `json:"started_at"`
+	WorkerId   string             `json:"worker_id"`
+}
+
+// AttemptOutcome defines model for Attempt.Outcome.
+type AttemptOutcome string
+
+// AttemptsResponse defines model for AttemptsResponse.
+type AttemptsResponse struct {
+	Attempts []Attempt `json:"attempts"`
+}
 
 // CompleteRequest defines model for CompleteRequest.
 type CompleteRequest struct {
@@ -53,8 +83,11 @@ type EnqueueRequest struct {
 
 // FailRequest defines model for FailRequest.
 type FailRequest struct {
-	Error    string `json:"error"`
-	WorkerId string `json:"worker_id"`
+	Error string `json:"error"`
+
+	// Permanent When true, mark the job dead without retry
+	Permanent *bool  `json:"permanent,omitempty"`
+	WorkerId  string `json:"worker_id"`
 }
 
 // FieldError defines model for FieldError.
@@ -76,15 +109,17 @@ type HeartbeatRequest struct {
 
 // Job defines model for Job.
 type Job struct {
-	Attempts       int                `json:"attempts"`
-	CreatedAt      time.Time          `json:"created_at"`
-	FinishedAt     *time.Time         `json:"finished_at"`
-	Id             openapi_types.UUID `json:"id"`
-	IdempotencyKey *string            `json:"idempotency_key,omitempty"`
-	LastError      *string            `json:"last_error,omitempty"`
-	LeaseExpiresAt *time.Time         `json:"lease_expires_at"`
-	LeaseOwner     *string            `json:"lease_owner,omitempty"`
-	MaxAttempts    int                `json:"max_attempts"`
+	Attempts        int                `json:"attempts"`
+	CancelRequested bool               `json:"cancel_requested"`
+	CancelledAt     *time.Time         `json:"cancelled_at"`
+	CreatedAt       time.Time          `json:"created_at"`
+	FinishedAt      *time.Time         `json:"finished_at"`
+	Id              openapi_types.UUID `json:"id"`
+	IdempotencyKey  *string            `json:"idempotency_key,omitempty"`
+	LastError       *string            `json:"last_error,omitempty"`
+	LeaseExpiresAt  *time.Time         `json:"lease_expires_at"`
+	LeaseOwner      *string            `json:"lease_owner,omitempty"`
+	MaxAttempts     int                `json:"max_attempts"`
 
 	// Payload Opaque JSON payload
 	Payload   jraw.RawMessage `json:"payload"`
@@ -96,15 +131,26 @@ type Job struct {
 	UpdatedAt time.Time       `json:"updated_at"`
 }
 
-// JobStatus defines model for Job.Status.
+// JobPage defines model for JobPage.
+type JobPage struct {
+	Jobs []Job `json:"jobs"`
+
+	// NextCursor Empty string when this is the last page
+	NextCursor string `json:"next_cursor"`
+}
+
+// JobStatus defines model for JobStatus.
 type JobStatus string
 
 // LeaseRequest defines model for LeaseRequest.
 type LeaseRequest struct {
 	// LeaseSeconds Lease duration in seconds (default 30)
-	LeaseSeconds *int   `json:"lease_seconds,omitempty"`
-	MaxJobs      *int   `json:"max_jobs,omitempty"`
-	WorkerId     string `json:"worker_id"`
+	LeaseSeconds *int `json:"lease_seconds,omitempty"`
+	MaxJobs      *int `json:"max_jobs,omitempty"`
+
+	// WaitSeconds Long-poll wait in seconds (default 0 = return immediately)
+	WaitSeconds *int   `json:"wait_seconds,omitempty"`
+	WorkerId    string `json:"worker_id"`
 }
 
 // LeaseResponse defines model for LeaseResponse.
@@ -119,11 +165,62 @@ type Problem struct {
 	Instance *string       `json:"instance,omitempty"`
 	Status   int           `json:"status"`
 	Title    string        `json:"title"`
-	Type     string        `json:"type"`
+
+	// Type Problem type URI. Conflict responses use
+	// https://relay.dev/problems/lease-lost or
+	// https://relay.dev/problems/invalid-transition.
+	Type string `json:"type"`
+}
+
+// Queue defines model for Queue.
+type Queue struct {
+	CreatedAt time.Time `json:"created_at"`
+	Name      string    `json:"name"`
+	Paused    bool      `json:"paused"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// QueueStats defines model for QueueStats.
+type QueueStats struct {
+	Cancelled int64 `json:"cancelled"`
+	Dead      int64 `json:"dead"`
+
+	// OldestPendingAgeSeconds Age in seconds of oldest due pending job (0 if none)
+	OldestPendingAgeSeconds int64  `json:"oldest_pending_age_seconds"`
+	Paused                  bool   `json:"paused"`
+	Pending                 int64  `json:"pending"`
+	Queue                   string `json:"queue"`
+	Running                 int64  `json:"running"`
+	Scheduled               int64  `json:"scheduled"`
+	Succeeded               int64  `json:"succeeded"`
+}
+
+// QueuesResponse defines model for QueuesResponse.
+type QueuesResponse struct {
+	Queues []Queue `json:"queues"`
+}
+
+// ReleaseRequest defines model for ReleaseRequest.
+type ReleaseRequest struct {
+	WorkerId string `json:"worker_id"`
+}
+
+// RetryDeadRequest defines model for RetryDeadRequest.
+type RetryDeadRequest struct {
+	// Limit Max jobs to retry (default 1000)
+	Limit *int `json:"limit,omitempty"`
+}
+
+// RetryDeadResponse defines model for RetryDeadResponse.
+type RetryDeadResponse struct {
+	Retried int `json:"retried"`
 }
 
 // JobID defines model for JobID.
 type JobID = openapi_types.UUID
+
+// QueueName defines model for QueueName.
+type QueueName = string
 
 // BadRequest defines model for BadRequest.
 type BadRequest = Problem
@@ -143,6 +240,13 @@ type PayloadTooLarge = Problem
 // Unauthorized defines model for Unauthorized.
 type Unauthorized = Problem
 
+// ListQueueJobsParams defines parameters for ListQueueJobs.
+type ListQueueJobsParams struct {
+	Status JobStatus `form:"status" json:"status"`
+	Limit  *int      `form:"limit,omitempty" json:"limit,omitempty"`
+	Cursor *string   `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
 // EnqueueJobJSONRequestBody defines body for EnqueueJob for application/json ContentType.
 type EnqueueJobJSONRequestBody = EnqueueRequest
 
@@ -154,6 +258,12 @@ type FailJobJSONRequestBody = FailRequest
 
 // HeartbeatJobJSONRequestBody defines body for HeartbeatJob for application/json ContentType.
 type HeartbeatJobJSONRequestBody = HeartbeatRequest
+
+// ReleaseJobJSONRequestBody defines body for ReleaseJob for application/json ContentType.
+type ReleaseJobJSONRequestBody = ReleaseRequest
+
+// RetryDeadJobsJSONRequestBody defines body for RetryDeadJobs for application/json ContentType.
+type RetryDeadJobsJSONRequestBody = RetryDeadRequest
 
 // LeaseJobsJSONRequestBody defines body for LeaseJobs for application/json ContentType.
 type LeaseJobsJSONRequestBody = LeaseRequest
@@ -172,6 +282,12 @@ type ServerInterface interface {
 	// Get a job by ID
 	// (GET /v1/jobs/{id})
 	GetJob(w http.ResponseWriter, r *http.Request, id JobID)
+	// List attempt history for a job
+	// (GET /v1/jobs/{id}/attempts)
+	ListJobAttempts(w http.ResponseWriter, r *http.Request, id JobID)
+	// Cancel a pending job or request cancel on a running job
+	// (POST /v1/jobs/{id}/cancel)
+	CancelJob(w http.ResponseWriter, r *http.Request, id JobID)
 	// Mark a job succeeded
 	// (POST /v1/jobs/{id}/complete)
 	CompleteJob(w http.ResponseWriter, r *http.Request, id JobID)
@@ -181,9 +297,33 @@ type ServerInterface interface {
 	// Extend a job lease
 	// (POST /v1/jobs/{id}/heartbeat)
 	HeartbeatJob(w http.ResponseWriter, r *http.Request, id JobID)
-	// Lease jobs from a queue
+	// Voluntarily release a lease (does not consume an attempt)
+	// (POST /v1/jobs/{id}/release)
+	ReleaseJob(w http.ResponseWriter, r *http.Request, id JobID)
+	// Retry a dead or cancelled job
+	// (POST /v1/jobs/{id}/retry)
+	RetryJob(w http.ResponseWriter, r *http.Request, id JobID)
+	// List registered queues
+	// (GET /v1/queues)
+	ListQueues(w http.ResponseWriter, r *http.Request)
+	// Queue statistics
+	// (GET /v1/queues/{queue})
+	GetQueueStats(w http.ResponseWriter, r *http.Request, queue QueueName)
+	// Bulk-retry dead jobs in a queue
+	// (POST /v1/queues/{queue}/dead/retry)
+	RetryDeadJobs(w http.ResponseWriter, r *http.Request, queue QueueName)
+	// List jobs in a queue by status (keyset pagination)
+	// (GET /v1/queues/{queue}/jobs)
+	ListQueueJobs(w http.ResponseWriter, r *http.Request, queue QueueName, params ListQueueJobsParams)
+	// Lease jobs from a queue (optional long-poll)
 	// (POST /v1/queues/{queue}/leases)
 	LeaseJobs(w http.ResponseWriter, r *http.Request, queue string)
+	// Pause a queue (claims return empty)
+	// (POST /v1/queues/{queue}/pause)
+	PauseQueue(w http.ResponseWriter, r *http.Request, queue QueueName)
+	// Resume a paused queue
+	// (POST /v1/queues/{queue}/resume)
+	ResumeQueue(w http.ResponseWriter, r *http.Request, queue QueueName)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -214,6 +354,18 @@ func (_ Unimplemented) GetJob(w http.ResponseWriter, r *http.Request, id JobID) 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// List attempt history for a job
+// (GET /v1/jobs/{id}/attempts)
+func (_ Unimplemented) ListJobAttempts(w http.ResponseWriter, r *http.Request, id JobID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Cancel a pending job or request cancel on a running job
+// (POST /v1/jobs/{id}/cancel)
+func (_ Unimplemented) CancelJob(w http.ResponseWriter, r *http.Request, id JobID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Mark a job succeeded
 // (POST /v1/jobs/{id}/complete)
 func (_ Unimplemented) CompleteJob(w http.ResponseWriter, r *http.Request, id JobID) {
@@ -232,9 +384,57 @@ func (_ Unimplemented) HeartbeatJob(w http.ResponseWriter, r *http.Request, id J
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Lease jobs from a queue
+// Voluntarily release a lease (does not consume an attempt)
+// (POST /v1/jobs/{id}/release)
+func (_ Unimplemented) ReleaseJob(w http.ResponseWriter, r *http.Request, id JobID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Retry a dead or cancelled job
+// (POST /v1/jobs/{id}/retry)
+func (_ Unimplemented) RetryJob(w http.ResponseWriter, r *http.Request, id JobID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List registered queues
+// (GET /v1/queues)
+func (_ Unimplemented) ListQueues(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Queue statistics
+// (GET /v1/queues/{queue})
+func (_ Unimplemented) GetQueueStats(w http.ResponseWriter, r *http.Request, queue QueueName) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Bulk-retry dead jobs in a queue
+// (POST /v1/queues/{queue}/dead/retry)
+func (_ Unimplemented) RetryDeadJobs(w http.ResponseWriter, r *http.Request, queue QueueName) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List jobs in a queue by status (keyset pagination)
+// (GET /v1/queues/{queue}/jobs)
+func (_ Unimplemented) ListQueueJobs(w http.ResponseWriter, r *http.Request, queue QueueName, params ListQueueJobsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Lease jobs from a queue (optional long-poll)
 // (POST /v1/queues/{queue}/leases)
 func (_ Unimplemented) LeaseJobs(w http.ResponseWriter, r *http.Request, queue string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Pause a queue (claims return empty)
+// (POST /v1/queues/{queue}/pause)
+func (_ Unimplemented) PauseQueue(w http.ResponseWriter, r *http.Request, queue QueueName) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Resume a paused queue
+// (POST /v1/queues/{queue}/resume)
+func (_ Unimplemented) ResumeQueue(w http.ResponseWriter, r *http.Request, queue QueueName) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -305,6 +505,56 @@ func (siw *ServerInterfaceWrapper) GetJob(w http.ResponseWriter, r *http.Request
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetJob(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListJobAttempts operation middleware
+func (siw *ServerInterfaceWrapper) ListJobAttempts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id JobID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListJobAttempts(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CancelJob operation middleware
+func (siw *ServerInterfaceWrapper) CancelJob(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id JobID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelJob(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -389,6 +639,179 @@ func (siw *ServerInterfaceWrapper) HeartbeatJob(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// ReleaseJob operation middleware
+func (siw *ServerInterfaceWrapper) ReleaseJob(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id JobID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReleaseJob(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RetryJob operation middleware
+func (siw *ServerInterfaceWrapper) RetryJob(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id JobID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RetryJob(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListQueues operation middleware
+func (siw *ServerInterfaceWrapper) ListQueues(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListQueues(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetQueueStats operation middleware
+func (siw *ServerInterfaceWrapper) GetQueueStats(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "queue" -------------
+	var queue QueueName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "queue", chi.URLParam(r, "queue"), &queue, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "queue", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetQueueStats(w, r, queue)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RetryDeadJobs operation middleware
+func (siw *ServerInterfaceWrapper) RetryDeadJobs(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "queue" -------------
+	var queue QueueName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "queue", chi.URLParam(r, "queue"), &queue, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "queue", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RetryDeadJobs(w, r, queue)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListQueueJobs operation middleware
+func (siw *ServerInterfaceWrapper) ListQueueJobs(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "queue" -------------
+	var queue QueueName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "queue", chi.URLParam(r, "queue"), &queue, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "queue", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListQueueJobsParams
+
+	// ------------- Required query parameter "status" -------------
+
+	if paramValue := r.URL.Query().Get("status"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "status", r.URL.Query(), &params.Status)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "cursor", r.URL.Query(), &params.Cursor)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListQueueJobs(w, r, queue, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // LeaseJobs operation middleware
 func (siw *ServerInterfaceWrapper) LeaseJobs(w http.ResponseWriter, r *http.Request) {
 
@@ -405,6 +828,56 @@ func (siw *ServerInterfaceWrapper) LeaseJobs(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.LeaseJobs(w, r, queue)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PauseQueue operation middleware
+func (siw *ServerInterfaceWrapper) PauseQueue(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "queue" -------------
+	var queue QueueName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "queue", chi.URLParam(r, "queue"), &queue, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "queue", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PauseQueue(w, r, queue)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResumeQueue operation middleware
+func (siw *ServerInterfaceWrapper) ResumeQueue(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "queue" -------------
+	var queue QueueName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "queue", chi.URLParam(r, "queue"), &queue, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "queue", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResumeQueue(w, r, queue)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -540,6 +1013,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/v1/jobs/{id}", wrapper.GetJob)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/jobs/{id}/attempts", wrapper.ListJobAttempts)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/jobs/{id}/cancel", wrapper.CancelJob)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/jobs/{id}/complete", wrapper.CompleteJob)
 	})
 	r.Group(func(r chi.Router) {
@@ -549,7 +1028,31 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/jobs/{id}/heartbeat", wrapper.HeartbeatJob)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/jobs/{id}/release", wrapper.ReleaseJob)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/jobs/{id}/retry", wrapper.RetryJob)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/queues", wrapper.ListQueues)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/queues/{queue}", wrapper.GetQueueStats)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/queues/{queue}/dead/retry", wrapper.RetryDeadJobs)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/queues/{queue}/jobs", wrapper.ListQueueJobs)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/queues/{queue}/leases", wrapper.LeaseJobs)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/queues/{queue}/pause", wrapper.PauseQueue)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/queues/{queue}/resume", wrapper.ResumeQueue)
 	})
 
 	return r
@@ -741,6 +1244,139 @@ type GetJob500ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response GetJob500ApplicationProblemPlusJSONResponse) VisitGetJobResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListJobAttemptsRequestObject struct {
+	Id JobID `json:"id"`
+}
+
+type ListJobAttemptsResponseObject interface {
+	VisitListJobAttemptsResponse(w http.ResponseWriter) error
+}
+
+type ListJobAttempts200JSONResponse AttemptsResponse
+
+func (response ListJobAttempts200JSONResponse) VisitListJobAttemptsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListJobAttempts400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ListJobAttempts400ApplicationProblemPlusJSONResponse) VisitListJobAttemptsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListJobAttempts401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListJobAttempts401ApplicationProblemPlusJSONResponse) VisitListJobAttemptsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListJobAttempts404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response ListJobAttempts404ApplicationProblemPlusJSONResponse) VisitListJobAttemptsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListJobAttempts500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListJobAttempts500ApplicationProblemPlusJSONResponse) VisitListJobAttemptsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CancelJobRequestObject struct {
+	Id JobID `json:"id"`
+}
+
+type CancelJobResponseObject interface {
+	VisitCancelJobResponse(w http.ResponseWriter) error
+}
+
+type CancelJob200JSONResponse Job
+
+func (response CancelJob200JSONResponse) VisitCancelJobResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CancelJob400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response CancelJob400ApplicationProblemPlusJSONResponse) VisitCancelJobResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CancelJob401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response CancelJob401ApplicationProblemPlusJSONResponse) VisitCancelJobResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CancelJob404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response CancelJob404ApplicationProblemPlusJSONResponse) VisitCancelJobResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CancelJob409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response CancelJob409ApplicationProblemPlusJSONResponse) VisitCancelJobResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CancelJob500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response CancelJob500ApplicationProblemPlusJSONResponse) VisitCancelJobResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(500)
 
@@ -999,6 +1635,385 @@ func (response HeartbeatJob500ApplicationProblemPlusJSONResponse) VisitHeartbeat
 	return json.NewEncoder(w).Encode(response)
 }
 
+type ReleaseJobRequestObject struct {
+	Id   JobID `json:"id"`
+	Body *ReleaseJobJSONRequestBody
+}
+
+type ReleaseJobResponseObject interface {
+	VisitReleaseJobResponse(w http.ResponseWriter) error
+}
+
+type ReleaseJob200JSONResponse Job
+
+func (response ReleaseJob200JSONResponse) VisitReleaseJobResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ReleaseJob400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ReleaseJob400ApplicationProblemPlusJSONResponse) VisitReleaseJobResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ReleaseJob401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ReleaseJob401ApplicationProblemPlusJSONResponse) VisitReleaseJobResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ReleaseJob404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response ReleaseJob404ApplicationProblemPlusJSONResponse) VisitReleaseJobResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ReleaseJob409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response ReleaseJob409ApplicationProblemPlusJSONResponse) VisitReleaseJobResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ReleaseJob413ApplicationProblemPlusJSONResponse struct {
+	PayloadTooLargeApplicationProblemPlusJSONResponse
+}
+
+func (response ReleaseJob413ApplicationProblemPlusJSONResponse) VisitReleaseJobResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(413)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ReleaseJob500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ReleaseJob500ApplicationProblemPlusJSONResponse) VisitReleaseJobResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RetryJobRequestObject struct {
+	Id JobID `json:"id"`
+}
+
+type RetryJobResponseObject interface {
+	VisitRetryJobResponse(w http.ResponseWriter) error
+}
+
+type RetryJob200JSONResponse Job
+
+func (response RetryJob200JSONResponse) VisitRetryJobResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RetryJob400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response RetryJob400ApplicationProblemPlusJSONResponse) VisitRetryJobResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RetryJob401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response RetryJob401ApplicationProblemPlusJSONResponse) VisitRetryJobResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RetryJob404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response RetryJob404ApplicationProblemPlusJSONResponse) VisitRetryJobResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RetryJob409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response RetryJob409ApplicationProblemPlusJSONResponse) VisitRetryJobResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RetryJob500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response RetryJob500ApplicationProblemPlusJSONResponse) VisitRetryJobResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListQueuesRequestObject struct {
+}
+
+type ListQueuesResponseObject interface {
+	VisitListQueuesResponse(w http.ResponseWriter) error
+}
+
+type ListQueues200JSONResponse QueuesResponse
+
+func (response ListQueues200JSONResponse) VisitListQueuesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListQueues401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListQueues401ApplicationProblemPlusJSONResponse) VisitListQueuesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListQueues500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListQueues500ApplicationProblemPlusJSONResponse) VisitListQueuesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetQueueStatsRequestObject struct {
+	Queue QueueName `json:"queue"`
+}
+
+type GetQueueStatsResponseObject interface {
+	VisitGetQueueStatsResponse(w http.ResponseWriter) error
+}
+
+type GetQueueStats200JSONResponse QueueStats
+
+func (response GetQueueStats200JSONResponse) VisitGetQueueStatsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetQueueStats400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetQueueStats400ApplicationProblemPlusJSONResponse) VisitGetQueueStatsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetQueueStats401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetQueueStats401ApplicationProblemPlusJSONResponse) VisitGetQueueStatsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetQueueStats404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetQueueStats404ApplicationProblemPlusJSONResponse) VisitGetQueueStatsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetQueueStats500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response GetQueueStats500ApplicationProblemPlusJSONResponse) VisitGetQueueStatsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RetryDeadJobsRequestObject struct {
+	Queue QueueName `json:"queue"`
+	Body  *RetryDeadJobsJSONRequestBody
+}
+
+type RetryDeadJobsResponseObject interface {
+	VisitRetryDeadJobsResponse(w http.ResponseWriter) error
+}
+
+type RetryDeadJobs200JSONResponse RetryDeadResponse
+
+func (response RetryDeadJobs200JSONResponse) VisitRetryDeadJobsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RetryDeadJobs400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response RetryDeadJobs400ApplicationProblemPlusJSONResponse) VisitRetryDeadJobsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RetryDeadJobs401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response RetryDeadJobs401ApplicationProblemPlusJSONResponse) VisitRetryDeadJobsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RetryDeadJobs404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response RetryDeadJobs404ApplicationProblemPlusJSONResponse) VisitRetryDeadJobsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RetryDeadJobs413ApplicationProblemPlusJSONResponse struct {
+	PayloadTooLargeApplicationProblemPlusJSONResponse
+}
+
+func (response RetryDeadJobs413ApplicationProblemPlusJSONResponse) VisitRetryDeadJobsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(413)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RetryDeadJobs500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response RetryDeadJobs500ApplicationProblemPlusJSONResponse) VisitRetryDeadJobsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListQueueJobsRequestObject struct {
+	Queue  QueueName `json:"queue"`
+	Params ListQueueJobsParams
+}
+
+type ListQueueJobsResponseObject interface {
+	VisitListQueueJobsResponse(w http.ResponseWriter) error
+}
+
+type ListQueueJobs200JSONResponse JobPage
+
+func (response ListQueueJobs200JSONResponse) VisitListQueueJobsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListQueueJobs400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ListQueueJobs400ApplicationProblemPlusJSONResponse) VisitListQueueJobsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListQueueJobs401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListQueueJobs401ApplicationProblemPlusJSONResponse) VisitListQueueJobsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListQueueJobs500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ListQueueJobs500ApplicationProblemPlusJSONResponse) VisitListQueueJobsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type LeaseJobsRequestObject struct {
 	Queue string `json:"queue"`
 	Body  *LeaseJobsJSONRequestBody
@@ -1061,6 +2076,128 @@ func (response LeaseJobs500ApplicationProblemPlusJSONResponse) VisitLeaseJobsRes
 	return json.NewEncoder(w).Encode(response)
 }
 
+type PauseQueueRequestObject struct {
+	Queue QueueName `json:"queue"`
+}
+
+type PauseQueueResponseObject interface {
+	VisitPauseQueueResponse(w http.ResponseWriter) error
+}
+
+type PauseQueue200JSONResponse Queue
+
+func (response PauseQueue200JSONResponse) VisitPauseQueueResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PauseQueue400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response PauseQueue400ApplicationProblemPlusJSONResponse) VisitPauseQueueResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PauseQueue401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response PauseQueue401ApplicationProblemPlusJSONResponse) VisitPauseQueueResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PauseQueue404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response PauseQueue404ApplicationProblemPlusJSONResponse) VisitPauseQueueResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PauseQueue500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response PauseQueue500ApplicationProblemPlusJSONResponse) VisitPauseQueueResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ResumeQueueRequestObject struct {
+	Queue QueueName `json:"queue"`
+}
+
+type ResumeQueueResponseObject interface {
+	VisitResumeQueueResponse(w http.ResponseWriter) error
+}
+
+type ResumeQueue200JSONResponse Queue
+
+func (response ResumeQueue200JSONResponse) VisitResumeQueueResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ResumeQueue400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ResumeQueue400ApplicationProblemPlusJSONResponse) VisitResumeQueueResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ResumeQueue401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ResumeQueue401ApplicationProblemPlusJSONResponse) VisitResumeQueueResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ResumeQueue404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response ResumeQueue404ApplicationProblemPlusJSONResponse) VisitResumeQueueResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ResumeQueue500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response ResumeQueue500ApplicationProblemPlusJSONResponse) VisitResumeQueueResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// Liveness probe
@@ -1075,6 +2212,12 @@ type StrictServerInterface interface {
 	// Get a job by ID
 	// (GET /v1/jobs/{id})
 	GetJob(ctx context.Context, request GetJobRequestObject) (GetJobResponseObject, error)
+	// List attempt history for a job
+	// (GET /v1/jobs/{id}/attempts)
+	ListJobAttempts(ctx context.Context, request ListJobAttemptsRequestObject) (ListJobAttemptsResponseObject, error)
+	// Cancel a pending job or request cancel on a running job
+	// (POST /v1/jobs/{id}/cancel)
+	CancelJob(ctx context.Context, request CancelJobRequestObject) (CancelJobResponseObject, error)
 	// Mark a job succeeded
 	// (POST /v1/jobs/{id}/complete)
 	CompleteJob(ctx context.Context, request CompleteJobRequestObject) (CompleteJobResponseObject, error)
@@ -1084,9 +2227,33 @@ type StrictServerInterface interface {
 	// Extend a job lease
 	// (POST /v1/jobs/{id}/heartbeat)
 	HeartbeatJob(ctx context.Context, request HeartbeatJobRequestObject) (HeartbeatJobResponseObject, error)
-	// Lease jobs from a queue
+	// Voluntarily release a lease (does not consume an attempt)
+	// (POST /v1/jobs/{id}/release)
+	ReleaseJob(ctx context.Context, request ReleaseJobRequestObject) (ReleaseJobResponseObject, error)
+	// Retry a dead or cancelled job
+	// (POST /v1/jobs/{id}/retry)
+	RetryJob(ctx context.Context, request RetryJobRequestObject) (RetryJobResponseObject, error)
+	// List registered queues
+	// (GET /v1/queues)
+	ListQueues(ctx context.Context, request ListQueuesRequestObject) (ListQueuesResponseObject, error)
+	// Queue statistics
+	// (GET /v1/queues/{queue})
+	GetQueueStats(ctx context.Context, request GetQueueStatsRequestObject) (GetQueueStatsResponseObject, error)
+	// Bulk-retry dead jobs in a queue
+	// (POST /v1/queues/{queue}/dead/retry)
+	RetryDeadJobs(ctx context.Context, request RetryDeadJobsRequestObject) (RetryDeadJobsResponseObject, error)
+	// List jobs in a queue by status (keyset pagination)
+	// (GET /v1/queues/{queue}/jobs)
+	ListQueueJobs(ctx context.Context, request ListQueueJobsRequestObject) (ListQueueJobsResponseObject, error)
+	// Lease jobs from a queue (optional long-poll)
 	// (POST /v1/queues/{queue}/leases)
 	LeaseJobs(ctx context.Context, request LeaseJobsRequestObject) (LeaseJobsResponseObject, error)
+	// Pause a queue (claims return empty)
+	// (POST /v1/queues/{queue}/pause)
+	PauseQueue(ctx context.Context, request PauseQueueRequestObject) (PauseQueueResponseObject, error)
+	// Resume a paused queue
+	// (POST /v1/queues/{queue}/resume)
+	ResumeQueue(ctx context.Context, request ResumeQueueRequestObject) (ResumeQueueResponseObject, error)
 }
 
 type StrictHandlerFunc = strictnethttp.StrictHTTPHandlerFunc
@@ -1223,6 +2390,58 @@ func (sh *strictHandler) GetJob(w http.ResponseWriter, r *http.Request, id JobID
 	}
 }
 
+// ListJobAttempts operation middleware
+func (sh *strictHandler) ListJobAttempts(w http.ResponseWriter, r *http.Request, id JobID) {
+	var request ListJobAttemptsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListJobAttempts(ctx, request.(ListJobAttemptsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListJobAttempts")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListJobAttemptsResponseObject); ok {
+		if err := validResponse.VisitListJobAttemptsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CancelJob operation middleware
+func (sh *strictHandler) CancelJob(w http.ResponseWriter, r *http.Request, id JobID) {
+	var request CancelJobRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CancelJob(ctx, request.(CancelJobRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CancelJob")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CancelJobResponseObject); ok {
+		if err := validResponse.VisitCancelJobResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // CompleteJob operation middleware
 func (sh *strictHandler) CompleteJob(w http.ResponseWriter, r *http.Request, id JobID) {
 	var request CompleteJobRequestObject
@@ -1322,6 +2541,175 @@ func (sh *strictHandler) HeartbeatJob(w http.ResponseWriter, r *http.Request, id
 	}
 }
 
+// ReleaseJob operation middleware
+func (sh *strictHandler) ReleaseJob(w http.ResponseWriter, r *http.Request, id JobID) {
+	var request ReleaseJobRequestObject
+
+	request.Id = id
+
+	var body ReleaseJobJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReleaseJob(ctx, request.(ReleaseJobRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReleaseJob")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReleaseJobResponseObject); ok {
+		if err := validResponse.VisitReleaseJobResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RetryJob operation middleware
+func (sh *strictHandler) RetryJob(w http.ResponseWriter, r *http.Request, id JobID) {
+	var request RetryJobRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RetryJob(ctx, request.(RetryJobRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RetryJob")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RetryJobResponseObject); ok {
+		if err := validResponse.VisitRetryJobResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListQueues operation middleware
+func (sh *strictHandler) ListQueues(w http.ResponseWriter, r *http.Request) {
+	var request ListQueuesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListQueues(ctx, request.(ListQueuesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListQueues")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListQueuesResponseObject); ok {
+		if err := validResponse.VisitListQueuesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetQueueStats operation middleware
+func (sh *strictHandler) GetQueueStats(w http.ResponseWriter, r *http.Request, queue QueueName) {
+	var request GetQueueStatsRequestObject
+
+	request.Queue = queue
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetQueueStats(ctx, request.(GetQueueStatsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetQueueStats")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetQueueStatsResponseObject); ok {
+		if err := validResponse.VisitGetQueueStatsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RetryDeadJobs operation middleware
+func (sh *strictHandler) RetryDeadJobs(w http.ResponseWriter, r *http.Request, queue QueueName) {
+	var request RetryDeadJobsRequestObject
+
+	request.Queue = queue
+
+	var body RetryDeadJobsJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RetryDeadJobs(ctx, request.(RetryDeadJobsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RetryDeadJobs")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RetryDeadJobsResponseObject); ok {
+		if err := validResponse.VisitRetryDeadJobsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListQueueJobs operation middleware
+func (sh *strictHandler) ListQueueJobs(w http.ResponseWriter, r *http.Request, queue QueueName, params ListQueueJobsParams) {
+	var request ListQueueJobsRequestObject
+
+	request.Queue = queue
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListQueueJobs(ctx, request.(ListQueueJobsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListQueueJobs")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListQueueJobsResponseObject); ok {
+		if err := validResponse.VisitListQueueJobsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // LeaseJobs operation middleware
 func (sh *strictHandler) LeaseJobs(w http.ResponseWriter, r *http.Request, queue string) {
 	var request LeaseJobsRequestObject
@@ -1355,38 +2743,111 @@ func (sh *strictHandler) LeaseJobs(w http.ResponseWriter, r *http.Request, queue
 	}
 }
 
+// PauseQueue operation middleware
+func (sh *strictHandler) PauseQueue(w http.ResponseWriter, r *http.Request, queue QueueName) {
+	var request PauseQueueRequestObject
+
+	request.Queue = queue
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PauseQueue(ctx, request.(PauseQueueRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PauseQueue")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PauseQueueResponseObject); ok {
+		if err := validResponse.VisitPauseQueueResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ResumeQueue operation middleware
+func (sh *strictHandler) ResumeQueue(w http.ResponseWriter, r *http.Request, queue QueueName) {
+	var request ResumeQueueRequestObject
+
+	request.Queue = queue
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ResumeQueue(ctx, request.(ResumeQueueRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ResumeQueue")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ResumeQueueResponseObject); ok {
+		if err := validResponse.VisitResumeQueueResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
-	"dpb9FQAA//9WRbVmqCMAAA==",
+	"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",
+	"UEgAAA==",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file
