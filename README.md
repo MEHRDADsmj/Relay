@@ -36,10 +36,11 @@ for design decisions.
 | **1 — Core** | Done | Domain + app ports, Postgres & Redis adapters, OpenAPI REST API, `relay-server`, Go SDK, examples, Docker Compose, CI |
 | [2 — Reliability](docs/plan/phase-2.md) | Done | Exponential backoff, attempt history, reaper/retention, cancel/retry, queue pause, long-poll wakeups |
 | [3 — Platform](docs/plan/phase-3.md) | Done | Cron schedules, leader election, gRPC, scoped API keys, `relayctl`, dual SDK transport |
-| [4 — Ops](docs/plan/phase-4.md) | Planned | Prometheus, OpenTelemetry, Helm, GoReleaser |
+| [4 — Ops](docs/plan/phase-4.md) | Done | Prometheus, OpenTelemetry, Helm, GoReleaser, runbook |
 | [5 — Polish](docs/plan/phase-5.md) | Planned | Dashboard, load tests |
 
-Plans: [phase-1](docs/plan/phase-1.md), [phase-2](docs/plan/phase-2.md), [phase-3](docs/plan/phase-3.md).
+Plans: [phase-1](docs/plan/phase-1.md), [phase-2](docs/plan/phase-2.md), [phase-3](docs/plan/phase-3.md),
+[phase-4](docs/plan/phase-4.md). Ops runbook: [docs/runbook.md](docs/runbook.md).
 
 ## Quickstart
 
@@ -286,6 +287,148 @@ Additional Phase 2 semantics:
 - **Scheduler** — one leader per cluster ticks due schedules (`RELAY_SCHEDULER_*`). Compose
   runs two server instances so failover is visible.
 - **API keys** — prefer scoped stored keys over a long-lived bootstrap `RELAY_API_KEY`.
+- **Incidents** — alert meaning, queries, and `relayctl` steps:
+  [docs/runbook.md](docs/runbook.md).
+
+## Observability
+
+Metrics are Prometheus-native; traces use OpenTelemetry (OTLP). See
+[ADR 0015](docs/adr/0015-prometheus-metrics-otel-traces.md),
+[ADR 0016](docs/adr/0016-trace-links-for-async-jobs.md),
+[ADR 0017](docs/adr/0017-metric-cardinality-limits.md).
+
+### Local stack
+
+```bash
+make up-obs          # app stack + Prometheus / Grafana / Jaeger
+make demo            # enqueue demo jobs (rebuilds producer)
+make open-obs        # print URLs
+```
+
+| UI | URL |
+|---|---|
+| Grafana | http://localhost:3300 (anonymous Viewer) |
+| Prometheus | http://localhost:9390 |
+| Jaeger | http://localhost:16686 |
+
+Dashboards (provisioned): **Relay Overview**, **Relay Storage & Runtime** under
+`deploy/observability/grafana/`. Alert rules:
+[`deploy/observability/alerts.yml`](deploy/observability/alerts.yml)
+(`make check-alerts` / CI `promtool`).
+
+<!-- screenshots: capture after a demo run and drop into docs/images/
+![Grafana Relay Overview](docs/images/grafana-overview.png)
+![Jaeger producer with linked consumer](docs/images/jaeger-linked-spans.png)
+-->
+
+### Admin port and profiling
+
+`RELAY_ADMIN_ADDR` (default `:7429`) serves `/metrics`, `/debug/pprof/*`, `/healthz`,
+and `/readyz` on a **private** mux (pprof is not on the public HTTP port). Compose maps
+`7429`. Capture a CPU profile:
+
+```bash
+go tool pprof http://localhost:7429/debug/pprof/profile?seconds=30
+```
+
+### Metrics reference (server)
+
+| Metric | Type | Labels |
+|---|---|---|
+| `relay_http_requests_total` | counter | `route`, `method`, `code` |
+| `relay_http_request_duration_seconds` | histogram | `route`, `method` |
+| `grpc_server_*` | (middleware) | `grpc_service`, `grpc_method`, `grpc_code` |
+| `relay_jobs_enqueued_total` | counter | `queue`, `job_type`, `result` |
+| `relay_jobs_leased_total` | counter | `queue` |
+| `relay_lease_wait_seconds` | histogram | `queue` |
+| `relay_jobs_finished_total` | counter | `queue`, `job_type`, `outcome` |
+| `relay_job_run_duration_seconds` | histogram | `queue`, `job_type` |
+| `relay_jobs_dead_total` | counter | `queue`, `job_type` |
+| `relay_lease_lost_total` | counter | `queue` |
+| `relay_queue_jobs` | gauge | `queue`, `status` |
+| `relay_queue_oldest_pending_age_seconds` | gauge | `queue` |
+| `relay_queue_paused` | gauge | `queue` |
+| `relay_scheduler_fires_total` | counter | `schedule`, `result` |
+| `relay_leader` | gauge | `name` |
+| `relay_maintenance_runs_total` / `_affected_total` / `_duration_seconds` | counter / counter / histogram | `kind` |
+| `relay_storage_pool_*` | gauges | pool stats |
+| `relay_stats_collect_errors_total` | counter | — |
+| `relay_build_info` | gauge (=1) | `version`, `commit`, `go_version`, `storage` |
+
+`job_type` series are capped by `RELAY_METRICS_MAX_SERIES` (default 1000); overflow →
+`job_type="__other__"`.
+
+Worker SDK (`pkg/sdk/sdkprom`): `relay_worker_jobs_in_flight`,
+`relay_worker_job_duration_seconds`, `relay_worker_jobs_total`,
+`relay_worker_lease_errors_total`. Example worker exposes `:9464/metrics` in Compose.
+
+### Tracing
+
+Set `OTEL_EXPORTER_OTLP_ENDPOINT` (empty = off). Compose points at Jaeger
+(`jaeger:4317`) with `RELAY_TRACE_SAMPLE_RATIO=1.0`. Default sample ratio otherwise is
+`0.1`. Jobs persist W3C `traceparent`/`tracestate`; workers start **linked** consumer
+spans (not children). Logs include `trace_id` / `span_id` when a span is active.
+
+## Kubernetes (Helm)
+
+Chart: [`deploy/helm/relay`](deploy/helm/relay/) — probes, security context, optional HPA /
+PDB / NetworkPolicy / ServiceMonitor, Postgres migration Job as a Helm hook
+([ADR 0018](docs/adr/0018-helm-migrations-as-hooks.md)). **Does not** bundle Postgres or
+Redis; use Bitnami charts or a managed service. Full values: chart
+[README](deploy/helm/relay/README.md).
+
+```bash
+helm install relay ./deploy/helm/relay \
+  --set config.storage=postgres \
+  --set secret.postgresUrl='postgres://relay:relay@postgres:5432/relay?sslmode=disable' \
+  --set secret.apiKey='change-me' \
+  --set image.repository=ghcr.io/mehrdadsmj/relay-server \
+  --set image.tag=0.1.0
+```
+
+Admin metrics port is only on the `*-metrics` Service. Enable scraping:
+
+```yaml
+metrics:
+  serviceMonitor:
+    enabled: true
+```
+
+CI runs `helm lint`, `ct lint`, and a kind smoke test for both storages.
+
+## Install and release
+
+### Binaries
+
+```bash
+# From source (module path)
+go install github.com/MEHRDADsmj/relay/cmd/relay-server@latest
+go install github.com/MEHRDADsmj/relay/cmd/relayctl@latest
+
+relay-server --version
+relayctl version
+```
+
+GitHub Releases (tag `v*`): multi-arch archives for linux/darwin/windows × amd64/arm64,
+checksums, and SBOMs (syft). Prefer a tagged release over `@latest` in production.
+
+### Container images
+
+Published to GHCR on release (lowercase owner path):
+
+- `ghcr.io/mehrdadsmj/relay-server:<version>`
+- `ghcr.io/mehrdadsmj/relayctl:<version>`
+
+```bash
+docker pull ghcr.io/mehrdadsmj/relay-server:0.1.0
+```
+
+Local snapshot (no publish): `make release-snapshot` (`goreleaser release --snapshot --clean`).
+
+Release process: maintainers push an annotated tag `v*`; workflow runs lint/tests then
+GoReleaser. Agents must not create or push tags.
+
+<!-- TODO: cosign keyless signing for release artifacts (not implemented yet). -->
 
 ## Design decisions
 
@@ -305,6 +448,10 @@ Architecture Decision Records live in [docs/adr/](docs/adr/):
 12. [Leader election and idempotent fires](docs/adr/0012-leader-election-and-idempotent-fires.md)
 13. [API key format and hashing](docs/adr/0013-api-key-format-and-hashing.md)
 14. [gRPC alongside REST](docs/adr/0014-grpc-alongside-rest.md)
+15. [Prometheus metrics and OpenTelemetry traces](docs/adr/0015-prometheus-metrics-otel-traces.md)
+16. [Trace links for async jobs](docs/adr/0016-trace-links-for-async-jobs.md)
+17. [Metric cardinality limits](docs/adr/0017-metric-cardinality-limits.md)
+18. [Helm migrations as hooks](docs/adr/0018-helm-migrations-as-hooks.md)
 
 ## Testing
 
@@ -316,14 +463,17 @@ Architecture Decision Records live in [docs/adr/](docs/adr/):
 | E2E | `make test-e2e` (`-tags=e2e`); full stack, both backends (incl. Phase 3) |
 | Generated | `make check-generated` — sqlc + oapi-codegen + buf must be clean |
 | Lint / vulns | `make lint`; CI runs `govulncheck` |
+| Obs / Helm | `make check-alerts`; Helm lint + kind smoke in CI |
 
 ## Configuration
 
 Copy [`.env.example`](.env.example). Notable vars: `RELAY_STORAGE`, `RELAY_POSTGRES_URL`,
 `RELAY_REDIS_URL`, `RELAY_HTTP_ADDR`, `RELAY_GRPC_ADDR`, `RELAY_GRPC_REFLECTION`,
-`RELAY_API_KEY`, `RELAY_AUTH_CACHE_TTL`, `RELAY_SCHEDULER_ENABLED` / `RELAY_SCHEDULER_TICK`,
-`RELAY_INSTANCE_ID`, `RELAY_MIGRATE_ON_START`, `RELAY_RETRY_POLICY` / `RELAY_RETRY_BASE` /
-`RELAY_RETRY_MAX`, `RELAY_REAP_*`, `RELAY_PURGE_*`, `RELAY_RETENTION`, `RELAY_LEASE_MAX_WAIT`.
+`RELAY_ADMIN_ADDR`, `RELAY_API_KEY`, `RELAY_AUTH_CACHE_TTL`, `RELAY_SCHEDULER_ENABLED` /
+`RELAY_SCHEDULER_TICK`, `RELAY_INSTANCE_ID`, `RELAY_MIGRATE_ON_START`, `RELAY_RETRY_POLICY` /
+`RELAY_RETRY_BASE` / `RELAY_RETRY_MAX`, `RELAY_REAP_*`, `RELAY_PURGE_*`, `RELAY_RETENTION`,
+`RELAY_LEASE_MAX_WAIT`, `RELAY_METRICS_MAX_SERIES`, `RELAY_TRACE_SAMPLE_RATIO`,
+`RELAY_ENVIRONMENT`, `OTEL_EXPORTER_OTLP_ENDPOINT` (and standard `OTEL_*`).
 
 ## License
 
