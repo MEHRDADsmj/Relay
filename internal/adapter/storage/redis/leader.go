@@ -35,6 +35,14 @@ func NewLeaderElector(client *goredis.Client, prefix string) *LeaderElector {
 	}
 }
 
+// WithInstanceID sets the lease holder identity (RELAY_INSTANCE_ID). Empty is ignored.
+func (e *LeaderElector) WithInstanceID(id string) *LeaderElector {
+	if id != "" {
+		e.instanceID = id
+	}
+	return e
+}
+
 var _ app.LeaderElector = (*LeaderElector)(nil)
 
 // Campaign blocks until leadership for name is acquired or ctx is done.

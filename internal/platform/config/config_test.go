@@ -14,10 +14,13 @@ func TestLoad_Defaults(t *testing.T) {
 	cfg, err := Load()
 	require.NoError(t, err)
 	require.Equal(t, ":7420", cfg.HTTPAddr)
+	require.Equal(t, ":7421", cfg.GRPCAddr)
+	require.False(t, cfg.GRPCReflection)
 	require.Equal(t, StoragePostgres, cfg.Storage)
 	require.Equal(t, "relay", cfg.RedisKeyPrefix)
 	require.False(t, cfg.MigrateOnStart)
 	require.Empty(t, cfg.APIKey)
+	require.Equal(t, 30*time.Second, cfg.AuthCacheTTL)
 	require.Equal(t, RetryPolicyExponential, cfg.RetryPolicy)
 	require.Equal(t, time.Second, cfg.RetryBase)
 	require.Equal(t, time.Hour, cfg.RetryMax)
@@ -29,6 +32,9 @@ func TestLoad_Defaults(t *testing.T) {
 	require.Equal(t, 168*time.Hour, cfg.Retention)
 	require.Equal(t, 30*time.Second, cfg.LeaseMaxWait)
 	require.Equal(t, 45*time.Second, cfg.ShutdownTimeout)
+	require.True(t, cfg.SchedulerEnabled)
+	require.Equal(t, time.Second, cfg.SchedulerTick)
+	require.NotEmpty(t, cfg.InstanceID)
 	require.Equal(t, "info", cfg.LogLevel)
 	require.Equal(t, "json", cfg.LogFormat)
 }
@@ -104,17 +110,26 @@ func TestLoad_Overrides(t *testing.T) {
 	t.Setenv("RELAY_RETENTION", "24h")
 	t.Setenv("RELAY_LEASE_MAX_WAIT", "15s")
 	t.Setenv("RELAY_SHUTDOWN_TIMEOUT", "30s")
+	t.Setenv("RELAY_GRPC_ADDR", ":9421")
+	t.Setenv("RELAY_GRPC_REFLECTION", "true")
+	t.Setenv("RELAY_SCHEDULER_ENABLED", "false")
+	t.Setenv("RELAY_SCHEDULER_TICK", "2s")
+	t.Setenv("RELAY_INSTANCE_ID", "node-a")
+	t.Setenv("RELAY_AUTH_CACHE_TTL", "15s")
 	t.Setenv("RELAY_LOG_LEVEL", "debug")
 	t.Setenv("RELAY_LOG_FORMAT", "text")
 
 	cfg, err := Load()
 	require.NoError(t, err)
 	require.Equal(t, ":9000", cfg.HTTPAddr)
+	require.Equal(t, ":9421", cfg.GRPCAddr)
+	require.True(t, cfg.GRPCReflection)
 	require.Equal(t, StorageRedis, cfg.Storage)
 	require.Equal(t, "redis://localhost:63799/0", cfg.RedisURL)
 	require.Equal(t, "acme", cfg.RedisKeyPrefix)
 	require.True(t, cfg.MigrateOnStart)
 	require.Equal(t, "secret", cfg.APIKey)
+	require.Equal(t, 15*time.Second, cfg.AuthCacheTTL)
 	require.Equal(t, RetryPolicyFixed, cfg.RetryPolicy)
 	require.Equal(t, 2*time.Second, cfg.RetryBase)
 	require.Equal(t, 10*time.Minute, cfg.RetryMax)
@@ -126,6 +141,9 @@ func TestLoad_Overrides(t *testing.T) {
 	require.Equal(t, 24*time.Hour, cfg.Retention)
 	require.Equal(t, 15*time.Second, cfg.LeaseMaxWait)
 	require.Equal(t, 30*time.Second, cfg.ShutdownTimeout)
+	require.False(t, cfg.SchedulerEnabled)
+	require.Equal(t, 2*time.Second, cfg.SchedulerTick)
+	require.Equal(t, "node-a", cfg.InstanceID)
 	require.Equal(t, "debug", cfg.LogLevel)
 	require.Equal(t, "text", cfg.LogFormat)
 }
@@ -155,11 +173,14 @@ func clearOptional(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
 		"RELAY_HTTP_ADDR",
+		"RELAY_GRPC_ADDR",
+		"RELAY_GRPC_REFLECTION",
 		"RELAY_STORAGE",
 		"RELAY_REDIS_URL",
 		"RELAY_REDIS_KEY_PREFIX",
 		"RELAY_MIGRATE_ON_START",
 		"RELAY_API_KEY",
+		"RELAY_AUTH_CACHE_TTL",
 		"RELAY_RETRY_POLICY",
 		"RELAY_RETRY_BASE",
 		"RELAY_RETRY_MAX",
@@ -171,6 +192,9 @@ func clearOptional(t *testing.T) {
 		"RELAY_RETENTION",
 		"RELAY_LEASE_MAX_WAIT",
 		"RELAY_SHUTDOWN_TIMEOUT",
+		"RELAY_SCHEDULER_ENABLED",
+		"RELAY_SCHEDULER_TICK",
+		"RELAY_INSTANCE_ID",
 		"RELAY_LOG_LEVEL",
 		"RELAY_LOG_FORMAT",
 	} {

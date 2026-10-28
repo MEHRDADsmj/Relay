@@ -63,6 +63,11 @@ func (r *Repository) Close() {
 	r.pool.Close()
 }
 
+// Pool returns the underlying pgx pool (for LeaderElector wiring).
+func (r *Repository) Pool() *pgxpool.Pool {
+	return r.pool
+}
+
 var (
 	_ app.JobRepository         = (*Repository)(nil)
 	_ app.QueueRepository       = (*Repository)(nil)

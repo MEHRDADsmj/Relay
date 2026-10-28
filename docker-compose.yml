@@ -38,8 +38,12 @@ services:
         GOPROXY: ${COMPOSE_GOPROXY:-https://proxy.golang.org,direct}
     ports:
       - "7420:7420"
+      - "7421:7421"
     environment:
       RELAY_HTTP_ADDR: ":7420"
+      RELAY_GRPC_ADDR: ":7421"
+      RELAY_GRPC_REFLECTION: "true"
+      RELAY_SCHEDULER_ENABLED: "true"
       RELAY_STORAGE: ${RELAY_STORAGE:-postgres}
       RELAY_POSTGRES_URL: postgres://relay:relay@postgres:5432/relay?sslmode=disable
       RELAY_REDIS_URL: redis://redis:6379/0
@@ -49,6 +53,9 @@ services:
       RELAY_SHUTDOWN_TIMEOUT: 45s
       RELAY_LOG_LEVEL: info
       RELAY_LOG_FORMAT: json
+      RELAY_API_KEY: ${RELAY_API_KEY:-}
+    deploy:
+      replicas: 2
     depends_on:
       postgres:
         condition: service_healthy
@@ -60,6 +67,71 @@ services:
       timeout: 3s
       retries: 12
       start_period: 15s
+
+  # Non-swarm Compose ignores deploy.replicas; second instance for leader election demo.
+  relay-server-2:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        CMD: relay-server
+        GOPROXY: ${COMPOSE_GOPROXY:-https://proxy.golang.org,direct}
+    environment:
+      RELAY_HTTP_ADDR: ":7420"
+      RELAY_GRPC_ADDR: ":7421"
+      RELAY_GRPC_REFLECTION: "true"
+      RELAY_SCHEDULER_ENABLED: "true"
+      RELAY_INSTANCE_ID: relay-server-2
+      RELAY_STORAGE: ${RELAY_STORAGE:-postgres}
+      RELAY_POSTGRES_URL: postgres://relay:relay@postgres:5432/relay?sslmode=disable
+      RELAY_REDIS_URL: redis://redis:6379/0
+      RELAY_REDIS_KEY_PREFIX: relay
+      RELAY_MIGRATE_ON_START: "false"
+      RELAY_RETRY_DELAY: 5s
+      RELAY_SHUTDOWN_TIMEOUT: 45s
+      RELAY_LOG_LEVEL: info
+      RELAY_LOG_FORMAT: json
+      RELAY_API_KEY: ${RELAY_API_KEY:-}
+    depends_on:
+      relay-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
+
+  seed-schedule:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        CMD: relayctl
+        GOPROXY: ${COMPOSE_GOPROXY:-https://proxy.golang.org,direct}
+    environment:
+      RELAY_URL: http://relay-server:7420
+      RELAY_API_KEY: ${RELAY_API_KEY:-}
+    entrypoint: ["/app"]
+    command:
+      [
+        "schedule",
+        "create",
+        "--name",
+        "example",
+        "--cron",
+        "@every 1m",
+        "--queue",
+        "default",
+        "--type",
+        "example",
+        "--payload",
+        "{}",
+      ]
+    depends_on:
+      relay-server:
+        condition: service_healthy
+    restart: "no"
 
   example-worker:
     build:

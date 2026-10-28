@@ -16,8 +16,10 @@ import (
 	"time"
 
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 
 	adaptercron "github.com/MEHRDADsmj/relay/internal/adapter/cron"
+	adaptergrpc "github.com/MEHRDADsmj/relay/internal/adapter/grpc"
 	adapterhttp "github.com/MEHRDADsmj/relay/internal/adapter/http"
 	"github.com/MEHRDADsmj/relay/internal/adapter/storage/postgres"
 	redisstore "github.com/MEHRDADsmj/relay/internal/adapter/storage/redis"
@@ -43,8 +45,10 @@ func run(args []string) error {
 		return runMigrate(rest)
 	case "healthcheck":
 		return runHealthcheck()
+	case "apikey":
+		return runAPIKey(rest)
 	default:
-		return fmt.Errorf("unknown command %q (want serve|migrate|healthcheck)", cmd)
+		return fmt.Errorf("unknown command %q (want serve|migrate|healthcheck|apikey)", cmd)
 	}
 }
 
@@ -100,9 +104,13 @@ func runServe() error {
 	queues := app.NewQueueService(mustQueueRepo(repo), repo, clock)
 	apiKeyRepo := mustAPIKeyRepo(repo)
 	scheduleRepo := mustScheduleRepo(repo)
-	auth := app.NewAuthService(apiKeyRepo, clock, app.AuthServiceConfig{BootstrapKey: cfg.APIKey}, log)
+	auth := app.NewAuthService(apiKeyRepo, clock, app.AuthServiceConfig{
+		BootstrapKey: cfg.APIKey,
+		CacheTTL:     cfg.AuthCacheTTL,
+	}, log)
 	warnAuthConfig(ctx, log, cfg.APIKey, apiKeyRepo)
-	schedules := app.NewScheduleService(scheduleRepo, svc, adaptercron.NewParser(), clock, app.UUIDv7Generator{})
+	cronParser := adaptercron.NewParser()
+	schedules := app.NewScheduleService(scheduleRepo, svc, cronParser, clock, app.UUIDv7Generator{})
 	apiKeys := app.NewAPIKeyService(apiKeyRepo, clock)
 	handler := adapterhttp.NewRouter(svc, queues, schedules, apiKeys, adapterhttp.Options{
 		APIKey: cfg.APIKey,
@@ -117,6 +125,30 @@ func runServe() error {
 		PurgeBatch:    cfg.PurgeBatch,
 		Retention:     cfg.Retention,
 	}, log)
+
+	elector, err := newLeaderElector(repo, cfg)
+	if err != nil {
+		return err
+	}
+	scheduler := app.NewScheduler(scheduleRepo, svc, elector, cronParser, clock, app.SchedulerConfig{
+		Tick: cfg.SchedulerTick,
+	}, log)
+
+	grpcSrv := adaptergrpc.NewServer(adaptergrpc.Services{
+		Jobs:      svc,
+		Queues:    queues,
+		Schedules: schedules,
+		APIKeys:   apiKeys,
+	}, adaptergrpc.Options{
+		Auth:       auth,
+		Logger:     log,
+		Reflection: cfg.GRPCReflection,
+		Ready:      repo.Ping,
+	})
+	grpcLis, err := adaptergrpc.Listen(cfg.GRPCAddr)
+	if err != nil {
+		return fmt.Errorf("grpc listen: %w", err)
+	}
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -141,17 +173,43 @@ func runServe() error {
 		)
 	}
 
-	// Maintenance uses a child context cancelled only after HTTP shutdown so
-	// long-polls can finish before the reaper/purger stops (phase-2 §7).
+	// Scheduler resigns before HTTP/gRPC drain; maintenance stops after drain (phase-3 §8).
+	schedCtx, schedCancel := context.WithCancel(context.Background())
+	defer schedCancel()
 	maintCtx, maintCancel := context.WithCancel(context.Background())
 	defer maintCancel()
 
+	schedDone := make(chan struct{})
 	g, gctx := errgroup.WithContext(ctx)
+
+	if cfg.SchedulerEnabled {
+		g.Go(func() error {
+			defer close(schedDone)
+			log.Info("scheduler starting", "tick", cfg.SchedulerTick, "instance_id", cfg.InstanceID)
+			err := scheduler.Run(schedCtx)
+			if err == nil || errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return fmt.Errorf("scheduler: %w", err)
+		})
+	} else {
+		close(schedDone)
+		log.Info("scheduler disabled")
+	}
+
 	g.Go(func() error {
 		log.Info("http server listening", "addr", cfg.HTTPAddr, "storage", cfg.Storage)
 		err := srv.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("listen: %w", err)
+			return fmt.Errorf("http listen: %w", err)
+		}
+		return nil
+	})
+	g.Go(func() error {
+		log.Info("grpc server listening", "addr", cfg.GRPCAddr, "reflection", cfg.GRPCReflection)
+		err := grpcSrv.Serve(grpcLis)
+		if err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+			return fmt.Errorf("grpc serve: %w", err)
 		}
 		return nil
 	})
@@ -164,17 +222,29 @@ func runServe() error {
 	})
 	g.Go(func() error {
 		<-gctx.Done()
-		// 1–2: stop accepting HTTP; Shutdown waits for in-flight handlers (incl. long-polls).
+		// 1: stop scheduler (resign leadership).
+		log.Info("stopping scheduler")
+		schedCancel()
+		select {
+		case <-schedDone:
+		case <-time.After(5 * time.Second):
+			log.Warn("scheduler did not stop within 5s; continuing shutdown")
+		}
+
+		// 2: stop accepting HTTP/gRPC and drain.
 		shCtx, cancel := context.WithTimeout(context.WithoutCancel(gctx), cfg.ShutdownTimeout)
 		defer cancel()
-		log.Info("shutting down http server", "timeout", cfg.ShutdownTimeout)
+		log.Info("shutting down http and grpc servers", "timeout", cfg.ShutdownTimeout)
+		var shutdownErr error
 		if err := srv.Shutdown(shCtx); err != nil {
-			maintCancel()
-			return fmt.Errorf("shutdown: %w", err)
+			shutdownErr = fmt.Errorf("http shutdown: %w", err)
 		}
+		adaptergrpc.GracefulStop(grpcSrv, cfg.ShutdownTimeout)
+		_ = grpcLis.Close()
+
 		// 3: stop maintenance (4–5: notifier + storage close in deferred cleanup).
 		maintCancel()
-		return nil
+		return shutdownErr
 	})
 
 	if err := g.Wait(); err != nil {
@@ -217,6 +287,17 @@ func openRepository(ctx context.Context, cfg config.Config, log *slog.Logger) (a
 		}, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported storage %q", cfg.Storage)
+	}
+}
+
+func newLeaderElector(repo app.JobRepository, cfg config.Config) (app.LeaderElector, error) {
+	switch r := repo.(type) {
+	case *postgres.Repository:
+		return postgres.NewLeaderElector(r.Pool()), nil
+	case *redisstore.Repository:
+		return redisstore.NewLeaderElector(r.Client(), r.KeyPrefix()).WithInstanceID(cfg.InstanceID), nil
+	default:
+		return nil, fmt.Errorf("no leader elector for repository type %T", repo)
 	}
 }
 

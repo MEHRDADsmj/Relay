@@ -8,6 +8,15 @@ import (
 	"time"
 )
 
+// defaultInstanceID returns hostname-pid for RELAY_INSTANCE_ID.
+func defaultInstanceID() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "relay"
+	}
+	return fmt.Sprintf("%s-%d", host, os.Getpid())
+}
+
 // Storage backend identifiers.
 const (
 	StoragePostgres = "postgres"
@@ -22,26 +31,32 @@ const (
 
 // Config holds relay-server settings loaded from the environment.
 type Config struct {
-	HTTPAddr        string
-	Storage         string
-	PostgresURL     string
-	RedisURL        string
-	RedisKeyPrefix  string
-	MigrateOnStart  bool
-	APIKey          string
-	RetryPolicy     string
-	RetryBase       time.Duration
-	RetryMax        time.Duration
-	RetryDelay      time.Duration // legacy alias for fixed delay / RetryBase override
-	ReapInterval    time.Duration
-	ReapBatch       int
-	PurgeInterval   time.Duration
-	PurgeBatch      int
-	Retention       time.Duration
-	LeaseMaxWait    time.Duration
-	ShutdownTimeout time.Duration
-	LogLevel        string
-	LogFormat       string
+	HTTPAddr         string
+	GRPCAddr         string
+	GRPCReflection   bool
+	Storage          string
+	PostgresURL      string
+	RedisURL         string
+	RedisKeyPrefix   string
+	MigrateOnStart   bool
+	APIKey           string
+	AuthCacheTTL     time.Duration
+	RetryPolicy      string
+	RetryBase        time.Duration
+	RetryMax         time.Duration
+	RetryDelay       time.Duration // legacy alias for fixed delay / RetryBase override
+	ReapInterval     time.Duration
+	ReapBatch        int
+	PurgeInterval    time.Duration
+	PurgeBatch       int
+	Retention        time.Duration
+	LeaseMaxWait     time.Duration
+	ShutdownTimeout  time.Duration
+	SchedulerEnabled bool
+	SchedulerTick    time.Duration
+	InstanceID       string
+	LogLevel         string
+	LogFormat        string
 }
 
 // Load reads configuration from environment variables and validates it.
@@ -49,11 +64,13 @@ type Config struct {
 func Load() (Config, error) {
 	cfg := Config{
 		HTTPAddr:       envOr("RELAY_HTTP_ADDR", ":7420"),
+		GRPCAddr:       envOr("RELAY_GRPC_ADDR", ":7421"),
 		Storage:        strings.ToLower(envOr("RELAY_STORAGE", StoragePostgres)),
 		PostgresURL:    os.Getenv("RELAY_POSTGRES_URL"),
 		RedisURL:       os.Getenv("RELAY_REDIS_URL"),
 		RedisKeyPrefix: envOr("RELAY_REDIS_KEY_PREFIX", "relay"),
 		APIKey:         os.Getenv("RELAY_API_KEY"),
+		AuthCacheTTL:   30 * time.Second,
 		LogLevel:       strings.ToLower(envOr("RELAY_LOG_LEVEL", "info")),
 		LogFormat:      strings.ToLower(envOr("RELAY_LOG_FORMAT", "json")),
 		RetryPolicy:    strings.ToLower(envOr("RELAY_RETRY_POLICY", RetryPolicyExponential)),
@@ -67,7 +84,10 @@ func Load() (Config, error) {
 		Retention:      168 * time.Hour,
 		LeaseMaxWait:   30 * time.Second,
 		// ShutdownTimeout default = LeaseMaxWait + 15s margin (BaseContext still cancels long-polls on SIGTERM).
-		ShutdownTimeout: 45 * time.Second,
+		ShutdownTimeout:  45 * time.Second,
+		SchedulerEnabled: true,
+		SchedulerTick:    time.Second,
+		InstanceID:       envOr("RELAY_INSTANCE_ID", defaultInstanceID()),
 	}
 
 	var errs []string
@@ -78,6 +98,42 @@ func Load() (Config, error) {
 			errs = append(errs, fmt.Sprintf("RELAY_MIGRATE_ON_START: invalid bool %q", v))
 		} else {
 			cfg.MigrateOnStart = b
+		}
+	}
+
+	if v := os.Getenv("RELAY_GRPC_REFLECTION"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("RELAY_GRPC_REFLECTION: invalid bool %q", v))
+		} else {
+			cfg.GRPCReflection = b
+		}
+	}
+
+	if v := os.Getenv("RELAY_SCHEDULER_ENABLED"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("RELAY_SCHEDULER_ENABLED: invalid bool %q", v))
+		} else {
+			cfg.SchedulerEnabled = b
+		}
+	}
+
+	if v := os.Getenv("RELAY_AUTH_CACHE_TTL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("RELAY_AUTH_CACHE_TTL: %v", err))
+		} else {
+			cfg.AuthCacheTTL = d
+		}
+	}
+
+	if v := os.Getenv("RELAY_SCHEDULER_TICK"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("RELAY_SCHEDULER_TICK: %v", err))
+		} else {
+			cfg.SchedulerTick = d
 		}
 	}
 
@@ -235,6 +291,18 @@ func Load() (Config, error) {
 	}
 	if cfg.ShutdownTimeout <= 0 {
 		errs = append(errs, "RELAY_SHUTDOWN_TIMEOUT: must be greater than 0")
+	}
+	if cfg.AuthCacheTTL <= 0 {
+		errs = append(errs, "RELAY_AUTH_CACHE_TTL: must be greater than 0")
+	}
+	if cfg.SchedulerTick <= 0 {
+		errs = append(errs, "RELAY_SCHEDULER_TICK: must be greater than 0")
+	}
+	if cfg.GRPCAddr == "" {
+		errs = append(errs, "RELAY_GRPC_ADDR: must not be empty")
+	}
+	if cfg.InstanceID == "" {
+		errs = append(errs, "RELAY_INSTANCE_ID: must not be empty")
 	}
 
 	if len(errs) > 0 {

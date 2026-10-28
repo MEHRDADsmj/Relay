@@ -20,6 +20,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     set -eux; \
     case "${CMD}" in \
       relay-server) PKG=./cmd/relay-server ;; \
+      relayctl) PKG=./cmd/relayctl ;; \
       example-worker) PKG=./examples/worker ;; \
       example-producer) PKG=./examples/producer ;; \
       *) echo "unknown CMD=${CMD}" >&2; exit 1 ;; \
@@ -29,6 +30,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/app /app
 USER nonroot:nonroot
-EXPOSE 7420
+EXPOSE 7420 7421
 ENTRYPOINT ["/app"]
 CMD ["serve"]

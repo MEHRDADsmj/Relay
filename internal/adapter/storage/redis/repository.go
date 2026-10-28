@@ -95,6 +95,16 @@ func (r *Repository) Close() error {
 	return r.client.Close()
 }
 
+// Client returns the underlying Redis client (for LeaderElector wiring).
+func (r *Repository) Client() *goredis.Client {
+	return r.client
+}
+
+// KeyPrefix returns the Redis key prefix.
+func (r *Repository) KeyPrefix() string {
+	return r.keys.Prefix()
+}
+
 var (
 	_ app.JobRepository         = (*Repository)(nil)
 	_ app.QueueRepository       = (*Repository)(nil)
