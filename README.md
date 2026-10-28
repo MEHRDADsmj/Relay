@@ -39,14 +39,14 @@ Full Phase 1 plan: [docs/plan/phase-1.md](docs/plan/phase-1.md).
 
 ## Quickstart
 
-Requires only **Docker** (Compose v2).
+Requires only **Docker** (Compose v2). No Make needed for this path.
 
 ```bash
 # Start Postgres, Redis, relay-server, and two example workers
-make up
+docker compose up -d --build --scale example-worker=2
 
 # Enqueue a batch of demo jobs (producer profile)
-make demo
+docker compose --profile demo run --rm --no-deps example-producer
 
 # Or enqueue manually
 curl -sS -X POST http://localhost:7420/v1/jobs \
@@ -56,14 +56,16 @@ curl -sS -X POST http://localhost:7420/v1/jobs \
 curl -sS http://localhost:7420/readyz
 curl -sS http://localhost:7420/v1/jobs/<job-id>
 
-make down
+docker compose down -v
 ```
 
 Redis backend instead of Postgres:
 
 ```bash
-make up-redis
+RELAY_STORAGE=redis docker compose up -d --build --scale example-worker=2
 ```
+
+Optional Make shortcuts (same stack): `make up`, `make demo`, `make up-redis`, `make down`.
 
 Host ports avoid common clashes: API `7420`, Postgres `54329`, Redis `63799`.
 
@@ -84,7 +86,8 @@ Useful targets: `make test-integration`, `make test-e2e`, `make generate`,
 `make check-generated`, `make cover`.
 
 In GoLand / VS Code, run `cmd/relay-server` with env from `.env.example` after `make deps`.
-Set `RELAY_MIGRATE_ON_START=true` on first Postgres run (or `relay-server migrate`).
+Set `RELAY_MIGRATE_ON_START=true` on first Postgres run, or run migrations manually:
+`relay-server migrate up` (also `migrate status`, `migrate down`).
 
 ## HTTP API
 
