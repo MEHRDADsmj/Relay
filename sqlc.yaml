@@ -1,0 +1,12 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    queries: "internal/adapter/storage/postgres/queries"
+    schema: "internal/adapter/storage/postgres/migrations"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "internal/adapter/storage/postgres/sqlcgen"
+        sql_package: "pgx/v5"
+        emit_json_tags: false
+        emit_empty_slices: true
