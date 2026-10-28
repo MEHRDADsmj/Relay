@@ -12,15 +12,17 @@ import (
 )
 
 // cursorPayload is the JSON shape inside an opaque page cursor.
+// T is a pointer so missing t is distinct from an explicit zero.
 type cursorPayload struct {
-	T  int64  `json:"t"`  // unix milliseconds
-	ID string `json:"id"` // job UUID
+	T  *int64 `json:"t"`  // unix milliseconds (required, must be > 0)
+	ID string `json:"id"` // job UUID (required, non-nil)
 }
 
 // EncodeCursor returns a base64url-encoded JSON cursor for keyset pagination.
 func EncodeCursor(t time.Time, id domain.JobID) (string, error) {
+	ms := t.UTC().UnixMilli()
 	raw, err := json.Marshal(cursorPayload{
-		T:  t.UTC().UnixMilli(),
+		T:  &ms,
 		ID: id.String(),
 	})
 	if err != nil {
@@ -42,12 +44,15 @@ func DecodeCursor(cursor string) (time.Time, domain.JobID, error) {
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return time.Time{}, uuid.Nil, fmt.Errorf("%w: cursor: invalid json", domain.ErrValidation)
 	}
-	if p.T == 0 && p.ID == "" {
-		return time.Time{}, uuid.Nil, fmt.Errorf("%w: cursor: missing fields", domain.ErrValidation)
+	if p.T == nil || *p.T == 0 {
+		return time.Time{}, uuid.Nil, fmt.Errorf("%w: cursor: invalid t", domain.ErrValidation)
+	}
+	if p.ID == "" {
+		return time.Time{}, uuid.Nil, fmt.Errorf("%w: cursor: missing id", domain.ErrValidation)
 	}
 	id, err := uuid.Parse(p.ID)
-	if err != nil {
+	if err != nil || id == uuid.Nil {
 		return time.Time{}, uuid.Nil, fmt.Errorf("%w: cursor: invalid id", domain.ErrValidation)
 	}
-	return time.UnixMilli(p.T).UTC(), id, nil
+	return time.UnixMilli(*p.T).UTC(), id, nil
 }
