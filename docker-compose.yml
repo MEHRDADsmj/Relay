@@ -28,6 +28,37 @@ services:
       timeout: 5s
       retries: 10
 
+  relay-server:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        CMD: relay-server
+    ports:
+      - "7420:7420"
+    environment:
+      RELAY_HTTP_ADDR: ":7420"
+      RELAY_STORAGE: ${RELAY_STORAGE:-postgres}
+      RELAY_POSTGRES_URL: postgres://relay:relay@postgres:5432/relay?sslmode=disable
+      RELAY_REDIS_URL: redis://redis:6379/0
+      RELAY_REDIS_KEY_PREFIX: relay
+      RELAY_MIGRATE_ON_START: "true"
+      RELAY_RETRY_DELAY: 5s
+      RELAY_SHUTDOWN_TIMEOUT: 15s
+      RELAY_LOG_LEVEL: info
+      RELAY_LOG_FORMAT: json
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
+
 volumes:
   relay_pgdata:
   relay_redisdata:
