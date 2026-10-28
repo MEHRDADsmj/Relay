@@ -10,6 +10,11 @@ import (
 	"github.com/MEHRDADsmj/relay/internal/domain"
 )
 
+type statsKey struct {
+	queue  string
+	minute int64 // unix seconds, truncated to minute
+}
+
 // Repository is an in-memory storage backend implementing all app ports.
 type Repository struct {
 	mu        sync.Mutex
@@ -22,6 +27,7 @@ type Repository struct {
 	schedName map[string]domain.ScheduleID // name → id
 	apiKeys   map[string]domain.APIKey     // id → key
 	apiPrefix map[string]string            // prefix → id
+	stats     map[statsKey]*domain.ThroughputPoint
 }
 
 // New returns an empty in-memory repository.
@@ -36,6 +42,7 @@ func New() *Repository {
 		schedName: make(map[string]domain.ScheduleID),
 		apiKeys:   make(map[string]domain.APIKey),
 		apiPrefix: make(map[string]string),
+		stats:     make(map[statsKey]*domain.ThroughputPoint),
 	}
 }
 
@@ -43,10 +50,38 @@ var (
 	_ app.JobRepository         = (*Repository)(nil)
 	_ app.QueueRepository       = (*Repository)(nil)
 	_ app.MaintenanceRepository = (*Repository)(nil)
+	_ app.StatsRepository       = (*Repository)(nil)
 	_ app.JobNotifier           = (*Repository)(nil)
 	_ app.ScheduleRepository    = (*Repository)(nil)
 	_ app.APIKeyRepository      = (*Repository)(nil)
 )
+
+func minuteUnix(t time.Time) int64 {
+	return t.UTC().Truncate(time.Minute).Unix()
+}
+
+func (r *Repository) incrStatLocked(queue string, now time.Time, field string, delta int64) {
+	if delta == 0 || queue == "" {
+		return
+	}
+	m := minuteUnix(now)
+	key := statsKey{queue: queue, minute: m}
+	p, ok := r.stats[key]
+	if !ok {
+		p = &domain.ThroughputPoint{Minute: time.Unix(m, 0).UTC()}
+		r.stats[key] = p
+	}
+	switch field {
+	case "enqueued":
+		p.Enqueued += delta
+	case "succeeded":
+		p.Succeeded += delta
+	case "failed":
+		p.Failed += delta
+	case "dead":
+		p.Dead += delta
+	}
+}
 
 func idempotencyIndexKey(queue, key string) string {
 	return queue + "\x00" + key
@@ -152,6 +187,7 @@ func (r *Repository) Create(_ context.Context, job domain.Job) (domain.Job, bool
 		r.byKey[idempotencyIndexKey(stored.Queue, stored.IdempotencyKey)] = stored.ID
 	}
 	r.ensureQueueLocked(stored.Queue, stored.CreatedAt)
+	r.incrStatLocked(stored.Queue, stored.CreatedAt, "enqueued", 1)
 	// Notify when the job is immediately due (run_at <= created/updated "now").
 	if !stored.RunAt.After(stored.CreatedAt) {
 		r.notifyLocked(stored.Queue)
@@ -260,6 +296,7 @@ func (r *Repository) markExpiredDeadLocked(queue string, now time.Time) {
 		j.LeaseExpiresAt = nil
 		j.UpdatedAt = now
 		r.jobs[id] = j
+		r.incrStatLocked(j.Queue, now, "dead", 1)
 	}
 }
 
@@ -312,6 +349,9 @@ func (r *Repository) Complete(_ context.Context, id domain.JobID, owner string, 
 	}
 	r.closeRunningAttemptLocked(id, outcome, "", now)
 	r.jobs[id] = j
+	if status == domain.StatusSucceeded {
+		r.incrStatLocked(j.Queue, now, "succeeded", 1)
+	}
 	return cloneJob(j), nil
 }
 
@@ -346,6 +386,7 @@ func (r *Repository) Fail(_ context.Context, id domain.JobID, owner string, errM
 			j.RunAt = *decision.NextRunAt
 		}
 		r.closeRunningAttemptLocked(id, domain.AttemptFailed, errMsg, now)
+		r.incrStatLocked(j.Queue, now, "failed", 1)
 		if !j.RunAt.After(now) {
 			r.notifyLocked(j.Queue)
 		}
@@ -353,6 +394,7 @@ func (r *Repository) Fail(_ context.Context, id domain.JobID, owner string, errM
 		fin := now
 		j.FinishedAt = &fin
 		r.closeRunningAttemptLocked(id, domain.AttemptFailed, errMsg, now)
+		r.incrStatLocked(j.Queue, now, "dead", 1)
 	default:
 		r.closeRunningAttemptLocked(id, domain.AttemptFailed, errMsg, now)
 	}
@@ -627,6 +669,7 @@ func (r *Repository) ReapExpired(_ context.Context, now time.Time, limit int) (a
 			fin := now
 			j.FinishedAt = &fin
 			res.Dead++
+			r.incrStatLocked(j.Queue, now, "dead", 1)
 		} else {
 			j.Status = domain.StatusPending
 			j.RunAt = now
@@ -676,6 +719,38 @@ func (r *Repository) PurgeFinished(_ context.Context, before time.Time, limit in
 		}
 	}
 	return len(victims), nil
+}
+
+// Throughput implements app.StatsRepository.
+func (r *Repository) Throughput(_ context.Context, queue string, from, to time.Time) ([]domain.ThroughputPoint, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	fromU := minuteUnix(from)
+	toU := minuteUnix(to)
+	var out []domain.ThroughputPoint
+	for k, p := range r.stats {
+		if k.queue != queue || k.minute < fromU || k.minute > toU {
+			continue
+		}
+		out = append(out, *p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Minute.Before(out[j].Minute) })
+	return out, nil
+}
+
+// PurgeStats implements app.MaintenanceRepository.
+func (r *Repository) PurgeStats(_ context.Context, before time.Time) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cutoff := minuteUnix(before)
+	n := 0
+	for k := range r.stats {
+		if k.minute < cutoff {
+			delete(r.stats, k)
+			n++
+		}
+	}
+	return n, nil
 }
 
 // Subscribe implements app.JobNotifier.

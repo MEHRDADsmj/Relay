@@ -52,6 +52,7 @@ type Config struct {
 	PurgeInterval    time.Duration
 	PurgeBatch       int
 	Retention        time.Duration
+	StatsRetention   time.Duration
 	LeaseMaxWait     time.Duration
 	ShutdownTimeout  time.Duration
 	SchedulerEnabled bool
@@ -89,6 +90,7 @@ func Load() (Config, error) {
 		PurgeInterval:    time.Minute,
 		PurgeBatch:       1000,
 		Retention:        168 * time.Hour,
+		StatsRetention:   48 * time.Hour,
 		LeaseMaxWait:     30 * time.Second,
 		// ShutdownTimeout default = LeaseMaxWait + 15s margin (BaseContext still cancels long-polls on SIGTERM).
 		ShutdownTimeout:  45 * time.Second,
@@ -241,6 +243,14 @@ func Load() (Config, error) {
 			cfg.Retention = d
 		}
 	}
+	if v := os.Getenv("RELAY_STATS_RETENTION"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("RELAY_STATS_RETENTION: %v", err))
+		} else {
+			cfg.StatsRetention = d
+		}
+	}
 	if v := os.Getenv("RELAY_LEASE_MAX_WAIT"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
@@ -313,6 +323,9 @@ func Load() (Config, error) {
 	}
 	if cfg.Retention < 0 {
 		errs = append(errs, "RELAY_RETENTION: must be >= 0")
+	}
+	if cfg.StatsRetention < 0 {
+		errs = append(errs, "RELAY_STATS_RETENTION: must be >= 0")
 	}
 	if cfg.LeaseMaxWait <= 0 {
 		errs = append(errs, "RELAY_LEASE_MAX_WAIT: must be greater than 0")

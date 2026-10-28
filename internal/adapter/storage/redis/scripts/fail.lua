@@ -61,6 +61,7 @@ else
       'lease_expires_at', '',
       'updated_at', tostring(now)
     )
+    incr_throughput(prefix, queue, now, 'failed')
     if next_run_at <= now then
       redis.call('ZADD', ready_key(prefix, queue), score, id)
       publish_due(prefix, queue)
@@ -76,6 +77,7 @@ else
       'lease_expires_at', '',
       'updated_at', tostring(now)
     )
+    incr_throughput(prefix, queue, now, 'dead')
     add_terminal(prefix, queue, id, 'dead', now, now)
   end
 end

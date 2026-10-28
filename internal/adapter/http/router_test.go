@@ -52,7 +52,7 @@ func discardLog() *slog.Logger {
 }
 
 func phase3Services(repo *memory.Repository, clock fixedClock, jobs *app.JobService) (*app.QueueService, *app.ScheduleService, *app.APIKeyService) {
-	queues := app.NewQueueService(repo, repo, clock)
+	queues := app.NewQueueService(repo, repo, repo, clock)
 	schedules := app.NewScheduleService(repo, jobs, adaptercron.NewParser(), clock, app.UUIDv7Generator{})
 	apiKeys := app.NewAPIKeyService(repo, clock)
 	return queues, schedules, apiKeys
@@ -471,7 +471,7 @@ func TestErrors_LeaseSecondsFieldRemap(t *testing.T) {
 	h, _ := testRouter(t, "")
 	res := doJSON(t, h, http.MethodPost, "/v1/queues/default/leases", map[string]any{
 		"worker_id":     "w1",
-		"lease_seconds": 1, // below domain MinLeaseDuration (5s) → lease_duration validation
+		"lease_seconds": 1, // below domain MinLeaseDuration (5s) ? lease_duration validation
 	}, nil)
 	require.Equal(t, http.StatusBadRequest, res.Status)
 	require.Equal(t, "application/problem+json", res.Header.Get("Content-Type"))

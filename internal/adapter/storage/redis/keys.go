@@ -125,6 +125,16 @@ func (k Keys) Leader(name string) string {
 	return fmt.Sprintf("%s:leader:%s", k.prefix, name)
 }
 
+// Stats returns relay:stats:{queue}:{minute_unix}.
+func (k Keys) Stats(queue string, minuteUnix int64) string {
+	return fmt.Sprintf("%s:stats:%s:%d", k.prefix, queue, minuteUnix)
+}
+
+// StatsScanPattern returns relay:stats:* for SCAN-based purge.
+func (k Keys) StatsScanPattern() string {
+	return fmt.Sprintf("%s:stats:*", k.prefix)
+}
+
 // LeasedAllMember returns {queue}|{id}.
 func LeasedAllMember(queue, id string) string {
 	return queue + "|" + id

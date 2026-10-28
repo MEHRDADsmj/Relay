@@ -36,6 +36,10 @@ func (f *fakeMaintRepo) PurgeFinished(context.Context, time.Time, int) (int, err
 	return f.purgeN, nil
 }
 
+func (f *fakeMaintRepo) PurgeStats(context.Context, time.Time) (int, error) {
+	return 0, nil
+}
+
 func TestMaintenance_RunStopsOnCancel(t *testing.T) {
 	t.Parallel()
 	repo := &fakeMaintRepo{reap: app.ReapResult{Requeued: 1}, purgeN: 2}

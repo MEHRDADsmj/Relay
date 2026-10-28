@@ -49,6 +49,7 @@ for _, id in ipairs(expired) do
     )
     clear_lease_indexes(prefix, queue, id)
     add_terminal(prefix, queue, id, 'dead', now, now)
+    incr_throughput(prefix, queue, now, 'dead')
   else
     -- leave on ready for reclaim in step (c); status stays running until claimed
     redis.call('ZREM', leased, id)

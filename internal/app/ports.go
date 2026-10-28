@@ -103,6 +103,13 @@ type MaintenanceRepository interface {
 	// PurgeFinished deletes succeeded|dead|cancelled jobs (and attempts + idempotency keys)
 	// with finished_at < before, up to limit per call.
 	PurgeFinished(ctx context.Context, before time.Time, limit int) (int, error)
+	// PurgeStats deletes minutely throughput rows with minute < before.
+	PurgeStats(ctx context.Context, before time.Time) (int, error)
+}
+
+// StatsRepository reads minutely throughput counters written by job/maintenance write paths.
+type StatsRepository interface {
+	Throughput(ctx context.Context, queue string, from, to time.Time) ([]domain.ThroughputPoint, error)
 }
 
 // JobNotifier lets the app wait for "a job may be ready on queue X".

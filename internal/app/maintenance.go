@@ -19,6 +19,10 @@ type MaintenanceConfig struct {
 	// zero-valued (ReapInterval == 0). Explicit Retention: 0 with a non-zero
 	// ReapInterval means never purge.
 	Retention time.Duration
+	// StatsRetention is how long to keep minutely throughput rows. Default 48h when
+	// the config is zero-valued (ReapInterval == 0). Explicit StatsRetention: 0 with
+	// a non-zero ReapInterval means never purge stats.
+	StatsRetention time.Duration
 }
 
 // Maintenance runs reaping and purge loops until ctx is cancelled.
@@ -55,6 +59,9 @@ func NewMaintenance(repo MaintenanceRepository, clock Clock, cfg MaintenanceConf
 	}
 	if fullDefaults && cfg.Retention == 0 {
 		cfg.Retention = 168 * time.Hour
+	}
+	if fullDefaults && cfg.StatsRetention == 0 {
+		cfg.StatsRetention = 48 * time.Hour
 	}
 	return &Maintenance{repo: repo, clock: clock, cfg: cfg, log: log, metrics: NoopMetrics{}, tracer: tracerOrNoop(nil)}
 }
@@ -138,6 +145,11 @@ func (m *Maintenance) reapOnce(ctx context.Context) {
 }
 
 func (m *Maintenance) purgeOnce(ctx context.Context) {
+	m.purgeJobsOnce(ctx)
+	m.purgeStatsOnce(ctx)
+}
+
+func (m *Maintenance) purgeJobsOnce(ctx context.Context) {
 	if m.cfg.Retention == 0 {
 		return
 	}
@@ -164,4 +176,24 @@ func (m *Maintenance) purgeOnce(ctx context.Context) {
 		}
 	}
 	m.metrics.MaintenanceRun("purge", affected, time.Since(start), runErr)
+}
+
+func (m *Maintenance) purgeStatsOnce(ctx context.Context) {
+	if m.cfg.StatsRetention == 0 {
+		return
+	}
+	ctx, span := startSpan(ctx, m.tracer, "Maintenance.purge_stats")
+	var runErr error
+	defer func() { endSpan(span, runErr) }()
+
+	start := time.Now()
+	before := m.clock.Now().Add(-m.cfg.StatsRetention)
+	n, err := m.repo.PurgeStats(ctx, before)
+	if err != nil {
+		m.log.ErrorContext(ctx, "purge stats failed", "err", err)
+		runErr = err
+	} else if n > 0 {
+		m.log.InfoContext(ctx, "purged throughput stats", "count", n, "before", before)
+	}
+	m.metrics.MaintenanceRun("purge_stats", n, time.Since(start), runErr)
 }

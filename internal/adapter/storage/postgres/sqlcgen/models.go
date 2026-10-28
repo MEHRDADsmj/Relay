@@ -61,6 +61,15 @@ type Queue struct {
 	UpdatedAt time.Time
 }
 
+type QueueStatsMinutely struct {
+	Queue     string
+	Minute    time.Time
+	Enqueued  int64
+	Succeeded int64
+	Failed    int64
+	Dead      int64
+}
+
 type Schedule struct {
 	ID          uuid.UUID
 	Name        string

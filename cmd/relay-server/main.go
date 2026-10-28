@@ -177,7 +177,7 @@ func runServe() error {
 		log,
 		notifier,
 	).WithMetrics(bizMetrics).WithTracerProvider(otelTP)
-	queues := app.NewQueueService(mustQueueRepo(repo), repo, clock)
+	queues := app.NewQueueService(mustQueueRepo(repo), repo, mustStatsRepo(repo), clock)
 	queueStats := prom.NewQueueStatsCollector(queues, prom.QueueStatsOptions{})
 	if err := registry.Register(queueStats); err != nil {
 		return fmt.Errorf("queue stats collector: %w", err)
@@ -204,11 +204,12 @@ func runServe() error {
 	})
 
 	maint := app.NewMaintenance(mustMaintenanceRepo(repo), clock, app.MaintenanceConfig{
-		ReapInterval:  cfg.ReapInterval,
-		ReapBatch:     cfg.ReapBatch,
-		PurgeInterval: cfg.PurgeInterval,
-		PurgeBatch:    cfg.PurgeBatch,
-		Retention:     cfg.Retention,
+		ReapInterval:   cfg.ReapInterval,
+		ReapBatch:      cfg.ReapBatch,
+		PurgeInterval:  cfg.PurgeInterval,
+		PurgeBatch:     cfg.PurgeBatch,
+		Retention:      cfg.Retention,
+		StatsRetention: cfg.StatsRetention,
 	}, log).WithMetrics(bizMetrics).WithTracerProvider(otelTP)
 
 	elector, err := newLeaderElector(repo, cfg)
@@ -426,6 +427,14 @@ func mustQueueRepo(repo app.JobRepository) app.QueueRepository {
 		panic(fmt.Sprintf("%T does not implement app.QueueRepository", repo))
 	}
 	return q
+}
+
+func mustStatsRepo(repo app.JobRepository) app.StatsRepository {
+	s, ok := repo.(app.StatsRepository)
+	if !ok {
+		panic(fmt.Sprintf("%T does not implement app.StatsRepository", repo))
+	}
+	return s
 }
 
 func mustScheduleRepo(repo app.JobRepository) app.ScheduleRepository {

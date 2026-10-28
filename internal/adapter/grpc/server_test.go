@@ -89,7 +89,7 @@ func startTestServer(t *testing.T, bootstrap string) *testEnv {
 	clock := fixedClock{t: now}
 	ids := &seqIDs{}
 	jobs := app.NewJobService(repo, clock, ids, app.FixedDelayRetryPolicy{Delay: time.Second}, discardLog(), repo)
-	queues := app.NewQueueService(repo, repo, clock)
+	queues := app.NewQueueService(repo, repo, repo, clock)
 	schedules := app.NewScheduleService(repo, jobs, adaptercron.NewParser(), clock, app.UUIDv7Generator{})
 	apiKeys := app.NewAPIKeyService(repo, clock)
 	auth := app.NewAuthService(repo, clock, app.AuthServiceConfig{BootstrapKey: bootstrap}, discardLog())

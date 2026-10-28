@@ -24,7 +24,7 @@ func TestScopeMatrix(t *testing.T) {
 	clock := &fixedClock{now: now}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	js := app.NewJobService(repo, clock, app.UUIDv7Generator{}, app.FixedDelayRetryPolicy{Delay: time.Second}, log, nil)
-	qs := app.NewQueueService(repo, repo, clock)
+	qs := app.NewQueueService(repo, repo, repo, clock)
 	parser := adaptercron.NewParser()
 	ss := app.NewScheduleService(repo, js, parser, clock, app.UUIDv7Generator{})
 	aks := app.NewAPIKeyService(repo, clock)

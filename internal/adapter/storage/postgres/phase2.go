@@ -316,7 +316,9 @@ func (r *Repository) ReapExpired(ctx context.Context, now time.Time, limit int) 
 		dead, err := qtx.ReapExpiredDead(ctx, sqlcgen.ReapExpiredDeadParams{Now: now, ID: id})
 		if err == nil {
 			res.Dead++
-			_ = dead
+			if err := incrQueueStats(ctx, qtx, dead.Queue, now, 0, 0, 0, 1); err != nil {
+				return app.ReapResult{}, err
+			}
 			continue
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {

@@ -43,6 +43,7 @@ for _, member in ipairs(members) do
             'cancel_requested', '0'
           )
           add_terminal(prefix, queue, id, 'dead', now, now)
+          incr_throughput(prefix, queue, now, 'dead')
           dead = dead + 1
         else
           redis.call('HSET', jk,

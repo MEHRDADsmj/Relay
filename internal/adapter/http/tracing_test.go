@@ -43,7 +43,7 @@ func TestTracing_EnqueueLeaseComplete_HTTP(t *testing.T) {
 		repo, clock, &seqIDs{ids: []domain.JobID{id}},
 		app.FixedDelayRetryPolicy{Delay: time.Second}, log, repo,
 	).WithTracerProvider(tp)
-	queues := app.NewQueueService(repo, repo, clock)
+	queues := app.NewQueueService(repo, repo, repo, clock)
 	schedules := app.NewScheduleService(repo, svc, adaptercron.NewParser(), clock, app.UUIDv7Generator{})
 	apiKeys := app.NewAPIKeyService(repo, clock)
 	h := mountRouter(repo, clock, svc, queues, schedules, apiKeys, relayhttp.Options{

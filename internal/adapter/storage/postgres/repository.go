@@ -99,6 +99,9 @@ func (r *Repository) Create(ctx context.Context, job domain.Job) (domain.Job, bo
 
 	row, err := qtx.CreateJob(ctx, toCreateParams(job))
 	if err == nil {
+		if err := incrQueueStats(ctx, qtx, job.Queue, job.CreatedAt, 1, 0, 0, 0); err != nil {
+			return domain.Job{}, false, err
+		}
 		if !job.RunAt.After(job.CreatedAt) {
 			if err := notifyQueue(ctx, tx, job.Queue); err != nil {
 				return domain.Job{}, false, err
@@ -176,6 +179,9 @@ func (r *Repository) Claim(ctx context.Context, queue, owner string, limit int, 
 	}
 	for _, d := range deadRows {
 		if err := closeRunningAttempt(ctx, qtx, d.ID, domain.AttemptExpired, "lease expired", now); err != nil {
+			return nil, err
+		}
+		if err := incrQueueStats(ctx, qtx, d.Queue, now, 0, 0, 0, 1); err != nil {
 			return nil, err
 		}
 	}
@@ -282,6 +288,11 @@ func (r *Repository) Complete(ctx context.Context, id domain.JobID, owner string
 	if err := closeRunningAttempt(ctx, qtx, id, outcome, "", now); err != nil {
 		return domain.Job{}, err
 	}
+	if outcome == domain.AttemptSucceeded {
+		if err := incrQueueStats(ctx, qtx, job.Queue, now, 0, 1, 0, 0); err != nil {
+			return domain.Job{}, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return domain.Job{}, err
 	}
@@ -357,8 +368,18 @@ func (r *Repository) Fail(ctx context.Context, id domain.JobID, owner string, er
 		return domain.Job{}, err
 	}
 	stored := toDomain(row)
-	if stored.Status == domain.StatusPending && !stored.RunAt.After(now) {
-		if err := notifyQueue(ctx, tx, stored.Queue); err != nil {
+	switch stored.Status {
+	case domain.StatusPending:
+		if err := incrQueueStats(ctx, qtx, stored.Queue, now, 0, 0, 1, 0); err != nil {
+			return domain.Job{}, err
+		}
+		if !stored.RunAt.After(now) {
+			if err := notifyQueue(ctx, tx, stored.Queue); err != nil {
+				return domain.Job{}, err
+			}
+		}
+	case domain.StatusDead:
+		if err := incrQueueStats(ctx, qtx, stored.Queue, now, 0, 0, 0, 1); err != nil {
 			return domain.Job{}, err
 		}
 	}

@@ -82,7 +82,7 @@ func TestQueueService_PauseResumeStatsRetryAll(t *testing.T) {
 	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
 	repo := newQueueMem()
 	clock := &fixedClock{now: now}
-	qs := app.NewQueueService(repo, repo, clock)
+	qs := app.NewQueueService(repo, repo, &fakeStatsRepo{}, clock)
 	js := app.NewJobService(repo, clock, app.UUIDv7Generator{}, app.FixedDelayRetryPolicy{Delay: time.Second}, nil, nil)
 
 	_, _, err := js.Enqueue(adminCtx(), app.EnqueueCommand{Queue: "q1", Type: "t"})
@@ -127,7 +127,7 @@ func TestQueueService_PauseResumeStatsRetryAll(t *testing.T) {
 func TestQueueService_RetryAllDeadValidation(t *testing.T) {
 	t.Parallel()
 	repo := newQueueMem()
-	qs := app.NewQueueService(repo, repo, &fixedClock{now: time.Now().UTC()})
+	qs := app.NewQueueService(repo, repo, &fakeStatsRepo{}, &fixedClock{now: time.Now().UTC()})
 	_, err := qs.RetryAllDead(adminCtx(), app.RetryAllDeadCommand{Queue: "BAD"})
 	require.ErrorIs(t, err, domain.ErrValidation)
 }

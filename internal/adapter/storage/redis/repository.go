@@ -114,6 +114,7 @@ var (
 	_ app.JobRepository         = (*Repository)(nil)
 	_ app.QueueRepository       = (*Repository)(nil)
 	_ app.MaintenanceRepository = (*Repository)(nil)
+	_ app.StatsRepository       = (*Repository)(nil)
 	_ app.JobNotifier           = (*Repository)(nil)
 )
 

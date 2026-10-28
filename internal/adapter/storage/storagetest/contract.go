@@ -14,7 +14,7 @@ import (
 	"github.com/MEHRDADsmj/relay/internal/domain"
 )
 
-// RunContractTests runs the full storage contract suite (Phase 1 + Phase 2).
+// RunContractTests runs the full storage contract suite (Phase 1 + Phase 2 + stats).
 // Each subtest receives a fresh empty backend from newRepo.
 func RunContractTests(t *testing.T, newRepo func(t *testing.T) Backend) {
 	t.Helper()
@@ -22,6 +22,7 @@ func RunContractTests(t *testing.T, newRepo func(t *testing.T) Backend) {
 	RunQueueContract(t, newRepo)
 	RunMaintenanceContract(t, newRepo)
 	RunNotifierContract(t, newRepo)
+	RunStatsContract(t, newRepo)
 }
 
 // RunJobContract exercises job repository semantics (Phase 1 + Phase 2 job cases).

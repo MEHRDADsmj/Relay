@@ -54,7 +54,7 @@ func startDualStack(t *testing.T) (*app.JobService, *app.QueueService, *app.Sche
 	clock := dualFixedClock{t: now}
 	log := dualDiscardLog()
 	jobs := app.NewJobService(repo, clock, app.UUIDv7Generator{}, app.FixedDelayRetryPolicy{Delay: time.Second}, log, repo)
-	queues := app.NewQueueService(repo, repo, clock)
+	queues := app.NewQueueService(repo, repo, repo, clock)
 	schedules := app.NewScheduleService(repo, jobs, adaptercron.NewParser(), clock, app.UUIDv7Generator{})
 	apiKeys := app.NewAPIKeyService(repo, clock)
 	auth := app.NewAuthService(repo, clock, app.AuthServiceConfig{BootstrapKey: dualBootstrap}, log)

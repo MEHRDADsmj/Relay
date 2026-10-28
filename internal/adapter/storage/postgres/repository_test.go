@@ -55,7 +55,7 @@ func TestPostgresRepository_Contract(t *testing.T) {
 
 	storagetest.RunContractTests(t, func(t *testing.T) storagetest.Backend {
 		t.Helper()
-		_, err := pool.Exec(ctx, "TRUNCATE TABLE jobs, queues CASCADE")
+		_, err := pool.Exec(ctx, "TRUNCATE TABLE jobs, queues, queue_stats_minutely CASCADE")
 		require.NoError(t, err)
 		return repo
 	})
@@ -84,6 +84,7 @@ func TestPostgresMigration_RoundTripPhase1Seed(t *testing.T) {
 
 	// Apply all migrations, roll back to Phase 1 (00001), seed, then up through latest.
 	require.NoError(t, postgres.Migrate(ctx, dsn))
+	require.NoError(t, postgres.MigrateDown(ctx, dsn)) // down 00005
 	require.NoError(t, postgres.MigrateDown(ctx, dsn)) // down 00004
 	require.NoError(t, postgres.MigrateDown(ctx, dsn)) // down 00003
 	require.NoError(t, postgres.MigrateDown(ctx, dsn)) // down 00002 → Phase 1 schema

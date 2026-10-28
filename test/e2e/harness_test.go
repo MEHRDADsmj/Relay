@@ -130,7 +130,7 @@ func startStack(t *testing.T, b backend, opts stackOpts) *stack {
 	if opts.instanceID == "" {
 		opts.instanceID = fmt.Sprintf("e2e-%d", time.Now().UnixNano())
 	}
-	// Retention defaults to 0 with an explicit ReapInterval → never purge in e2e.
+	// Retention defaults to 0 with an explicit ReapInterval ? never purge in e2e.
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	clock := app.SystemClock{}
@@ -143,7 +143,7 @@ func startStack(t *testing.T, b backend, opts stackOpts) *stack {
 	require.True(t, ok, "backend must implement QueueRepository")
 
 	svc := app.NewJobService(b.repo, clock, app.UUIDv7Generator{}, opts.retry, log, notifier)
-	queues := app.NewQueueService(queueRepo, b.repo, clock)
+	queues := app.NewQueueService(queueRepo, b.repo, b.repo, clock)
 	scheduleRepo, ok := b.repo.(app.ScheduleRepository)
 	require.True(t, ok, "backend must implement ScheduleRepository")
 	apiKeyRepo, ok := b.repo.(app.APIKeyRepository)

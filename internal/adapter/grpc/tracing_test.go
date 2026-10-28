@@ -42,7 +42,7 @@ func TestTracing_EnqueueLeaseComplete_GRPC(t *testing.T) {
 		repo, clock, &seqIDs{ids: []domain.JobID{id}},
 		app.FixedDelayRetryPolicy{Delay: time.Second}, discardLog(), repo,
 	).WithTracerProvider(tp)
-	queues := app.NewQueueService(repo, repo, clock)
+	queues := app.NewQueueService(repo, repo, repo, clock)
 	schedules := app.NewScheduleService(repo, jobs, adaptercron.NewParser(), clock, app.UUIDv7Generator{})
 	apiKeys := app.NewAPIKeyService(repo, clock)
 	auth := app.NewAuthService(repo, clock, app.AuthServiceConfig{BootstrapKey: "k"}, discardLog())

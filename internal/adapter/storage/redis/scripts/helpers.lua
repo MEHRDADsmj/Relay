@@ -149,3 +149,17 @@ local function store_idem_redis_key(job_hash_key, idem_redis_key)
     redis.call('HSET', job_hash_key, 'idem_redis_key', idem_redis_key)
   end
 end
+
+-- Minutely throughput: relay:stats:{queue}:{minute_unix} hash fields.
+local stats_expire_sec = 172800 -- 48h
+
+local function stats_key(prefix, queue, minute_unix)
+  return prefix .. ':stats:' .. queue .. ':' .. tostring(minute_unix)
+end
+
+local function incr_throughput(prefix, queue, now_ms, field)
+  local minute = math.floor(tonumber(now_ms) / 60000) * 60
+  local key = stats_key(prefix, queue, minute)
+  redis.call('HINCRBY', key, field, 1)
+  redis.call('EXPIRE', key, stats_expire_sec)
+end

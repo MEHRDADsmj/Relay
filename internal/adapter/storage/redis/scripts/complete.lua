@@ -54,6 +54,7 @@ else
     'lease_expires_at', '',
     'updated_at', tostring(now)
   )
+  incr_throughput(prefix, queue, now, 'succeeded')
 end
 
 add_terminal(prefix, queue, id, final_status, now, now)

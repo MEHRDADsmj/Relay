@@ -49,6 +49,7 @@ redis.call('HSET', KEYS[1],
   'trace_context', ARGV[22]
 )
 store_idem_redis_key(KEYS[1], idem_key)
+incr_throughput(prefix, queue, now_ms, 'enqueued')
 
 if run_at_ms <= now_ms then
   redis.call('ZADD', KEYS[3], score, id)

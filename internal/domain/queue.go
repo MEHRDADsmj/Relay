@@ -22,3 +22,12 @@ type QueueStats struct {
 	Cancelled        int64
 	OldestPendingAge time.Duration // 0 if none
 }
+
+// ThroughputPoint is one minute of queue throughput counters (UTC-truncated).
+type ThroughputPoint struct {
+	Minute    time.Time // truncated to minute, UTC
+	Enqueued  int64
+	Succeeded int64
+	Failed    int64 // failed attempts that will retry
+	Dead      int64
+}

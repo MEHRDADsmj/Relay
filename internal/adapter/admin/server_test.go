@@ -61,7 +61,7 @@ func TestPublicRouter_NoPprof(t *testing.T) {
 	repo := memory.New()
 	clock := app.SystemClock{}
 	jobs := app.NewJobService(repo, clock, app.UUIDv7Generator{}, app.FixedDelayRetryPolicy{Delay: time.Minute}, nil, nil)
-	queues := app.NewQueueService(repo, repo, clock)
+	queues := app.NewQueueService(repo, repo, repo, clock)
 	h := adapterhttp.NewRouter(jobs, queues, nil, nil, adapterhttp.Options{})
 
 	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)

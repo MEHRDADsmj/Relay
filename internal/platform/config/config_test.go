@@ -32,6 +32,7 @@ func TestLoad_Defaults(t *testing.T) {
 	require.Equal(t, time.Minute, cfg.PurgeInterval)
 	require.Equal(t, 1000, cfg.PurgeBatch)
 	require.Equal(t, 168*time.Hour, cfg.Retention)
+	require.Equal(t, 48*time.Hour, cfg.StatsRetention)
 	require.Equal(t, 30*time.Second, cfg.LeaseMaxWait)
 	require.Equal(t, 45*time.Second, cfg.ShutdownTimeout)
 	require.True(t, cfg.SchedulerEnabled)
@@ -207,6 +208,7 @@ func clearOptional(t *testing.T) {
 		"RELAY_PURGE_INTERVAL",
 		"RELAY_PURGE_BATCH",
 		"RELAY_RETENTION",
+		"RELAY_STATS_RETENTION",
 		"RELAY_LEASE_MAX_WAIT",
 		"RELAY_SHUTDOWN_TIMEOUT",
 		"RELAY_SCHEDULER_ENABLED",
