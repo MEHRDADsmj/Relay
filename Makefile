@@ -56,7 +56,13 @@ else
 endif
 TAILWIND_URL := https://github.com/tailwindlabs/tailwindcss/releases/download/$(TAILWIND_VERSION)/$(TAILWIND_ASSET)
 
-.PHONY: help tools generate css lint test test-integration test-e2e cover build release-snapshot up down up-redis up-obs open-obs check-alerts deps demo check-generated
+K6_IMAGE ?= grafana/k6:0.54.0
+LOADTEST_SCRIPT ?= enqueue.js
+LOADTEST_RESULTS_DIR := $(CURDIR)/loadtest/results
+
+.PHONY: help tools generate css lint test test-integration test-e2e cover build release-snapshot up down up-redis up-obs open-obs check-alerts deps demo check-generated loadtest
+
+
 
 help: ## list targets
 	@echo "Relay Make targets:"
@@ -78,6 +84,7 @@ help: ## list targets
 	@echo "  make check-alerts      - promtool check rules (via Docker)"
 	@echo "  make deps              - start postgres + redis only"
 	@echo "  make demo              - up then run producer once"
+	@echo "  make loadtest          - run k6 via Docker (LOADTEST_SCRIPT=enqueue.js|mixed.js)"
 	@echo "  make check-generated   - regenerate and fail on dirty git tree"
 
 tools: ## go mod download + verify golangci-lint
@@ -142,12 +149,13 @@ cover: ## unit coverage HTML
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "wrote coverage.html"
 
-build: ## build server, relayctl, and examples into bin/
+build: ## build server, relayctl, relay-bench, and examples into bin/
 	$(GO) build -trimpath -ldflags "$(LDFLAGS)" -o bin/relay-server$(EXE) ./cmd/relay-server
 	$(GO) build -trimpath -ldflags "$(LDFLAGS)" -o bin/relayctl$(EXE) ./cmd/relayctl
+	$(GO) build -trimpath -ldflags "$(LDFLAGS)" -o bin/relay-bench$(EXE) ./cmd/relay-bench
 	$(GO) build -o bin/example-worker$(EXE) ./examples/worker
 	$(GO) build -o bin/example-producer$(EXE) ./examples/producer
-	@echo "built bin/relay-server$(EXE) bin/relayctl$(EXE) (refresh PATH: export PATH=\"$$PWD/bin:$$PATH\")"
+	@echo "built bin/relay-server$(EXE) bin/relayctl$(EXE) bin/relay-bench$(EXE) (refresh PATH: export PATH=\"$$PWD/bin:$$PATH\")"
 
 release-snapshot: ## goreleaser release --snapshot --clean (no publish)
 	@if ! command -v goreleaser >/dev/null 2>&1; then \
@@ -197,6 +205,21 @@ demo: up ## run demo producer
 	# --build: pick up example changes; --no-deps: avoid resetting example-worker scale to 1
 	COMPOSE_GOPROXY=$(COMPOSE_GOPROXY) docker compose --profile demo build example-producer
 	COMPOSE_GOPROXY=$(COMPOSE_GOPROXY) docker compose --profile demo run --rm --no-deps example-producer
+
+loadtest: ## run k6 load test in Docker against compose (host ports)
+	@mkdir -p "$(LOADTEST_RESULTS_DIR)"
+	# host.docker.internal reaches published compose ports on Docker Desktop.
+	# Override RELAY_URL for Linux bridge networking if needed.
+	MSYS_NO_PATHCONV=1 docker run --rm \
+		--add-host=host.docker.internal:host-gateway \
+		-v "$(CURDIR)/loadtest/k6:/scripts:ro" \
+		-v "$(LOADTEST_RESULTS_DIR):/results" \
+		-e RELAY_URL="$(or $(RELAY_URL),http://host.docker.internal:7420)" \
+		-e RELAY_API_KEY="$(RELAY_API_KEY)" \
+		-e RELAY_QUEUE="$(or $(RELAY_QUEUE),loadtest)" \
+		$(K6_IMAGE) run \
+		--summary-export=/results/$(basename $(LOADTEST_SCRIPT))-summary.json \
+		/scripts/$(LOADTEST_SCRIPT)
 
 check-generated: generate css ## fail if generated files drift
 	@git diff --exit-code -- \
