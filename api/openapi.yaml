@@ -950,7 +950,7 @@ components:
           description: Empty string when this is the last page
     Scope:
       type: string
-      enum: [producer, worker, admin]
+      enum: [producer, worker, admin, dashboard:read]
     CreateAPIKeyRequest:
       type: object
       required: [name, scopes]

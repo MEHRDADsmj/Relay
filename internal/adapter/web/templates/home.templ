@@ -1,0 +1,14 @@
+package templates
+
+templ HomePage(csrf string, keyName string) {
+	@Layout("Overview", csrf, true, homeBody(keyName))
+}
+
+templ homeBody(keyName string) {
+	<div>
+		<h1 class="text-2xl font-semibold tracking-tight">Overview</h1>
+		<p class="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+			Signed in as <strong>{ keyName }</strong>. Queue dashboards arrive in the next task.
+		</p>
+	</div>
+}

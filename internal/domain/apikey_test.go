@@ -16,6 +16,9 @@ func TestPrincipalCan(t *testing.T) {
 		{name: "exact admin", scopes: []Scope{ScopeAdmin}, need: ScopeAdmin, want: true},
 		{name: "admin implies producer", scopes: []Scope{ScopeAdmin}, need: ScopeProducer, want: true},
 		{name: "admin implies worker", scopes: []Scope{ScopeAdmin}, need: ScopeWorker, want: true},
+		{name: "admin implies dashboard", scopes: []Scope{ScopeAdmin}, need: ScopeDashboardRead, want: true},
+		{name: "dashboard exact", scopes: []Scope{ScopeDashboardRead}, need: ScopeDashboardRead, want: true},
+		{name: "dashboard cannot admin", scopes: []Scope{ScopeDashboardRead}, need: ScopeAdmin, want: false},
 		{name: "producer cannot worker", scopes: []Scope{ScopeProducer}, need: ScopeWorker, want: false},
 		{name: "worker cannot producer", scopes: []Scope{ScopeWorker}, need: ScopeProducer, want: false},
 		{name: "producer cannot admin", scopes: []Scope{ScopeProducer}, need: ScopeAdmin, want: false},
@@ -38,7 +41,7 @@ func TestPrincipalCan(t *testing.T) {
 func TestScopeConstants(t *testing.T) {
 	t.Parallel()
 
-	if ScopeProducer != "producer" || ScopeWorker != "worker" || ScopeAdmin != "admin" {
-		t.Fatalf("unexpected scope constants: %q %q %q", ScopeProducer, ScopeWorker, ScopeAdmin)
+	if ScopeProducer != "producer" || ScopeWorker != "worker" || ScopeAdmin != "admin" || ScopeDashboardRead != "dashboard:read" {
+		t.Fatalf("unexpected scope constants: %q %q %q %q", ScopeProducer, ScopeWorker, ScopeAdmin, ScopeDashboardRead)
 	}
 }

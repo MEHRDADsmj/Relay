@@ -1,0 +1,36 @@
+package templates
+
+templ LoginPage(csrf string, errMsg string) {
+	@Layout("Login", csrf, false, loginBody(csrf, errMsg))
+}
+
+templ loginBody(csrf string, errMsg string) {
+	<div class="mx-auto max-w-md">
+		<h1 class="text-2xl font-semibold tracking-tight">Sign in</h1>
+		<p class="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+			Use an API key with
+			<code class="rounded bg-zinc-200 px-1 dark:bg-zinc-800">admin</code>
+			or
+			<code class="rounded bg-zinc-200 px-1 dark:bg-zinc-800">dashboard:read</code>
+			scope.
+		</p>
+		if errMsg != "" {
+			<p class="mt-4 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200" role="alert">{ errMsg }</p>
+		}
+		<form method="post" action="/ui/login" class="mt-6 space-y-4">
+			<input type="hidden" name="csrf" value={ csrf }/>
+			<label class="block text-sm font-medium" for="api_key">API key</label>
+			<input
+				id="api_key"
+				name="api_key"
+				type="password"
+				required
+				autocomplete="current-password"
+				class="w-full rounded border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+			/>
+			<button type="submit" class="w-full cursor-pointer rounded bg-sky-700 px-3 py-2 text-sm font-medium text-white hover:bg-sky-800 dark:bg-sky-600 dark:hover:bg-sky-500">
+				Sign in
+			</button>
+		</form>
+	</div>
+}

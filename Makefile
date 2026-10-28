@@ -25,13 +25,45 @@ COMPOSE_GOPROXY ?= https://goproxy.io,direct
 
 .DEFAULT_GOAL := help
 
-.PHONY: help tools generate lint test test-integration test-e2e cover build release-snapshot up down up-redis up-obs open-obs check-alerts deps demo check-generated
+# Tailwind CSS standalone CLI (no Node). Pin version + per-platform SHA-256.
+TAILWIND_VERSION ?= v4.1.18
+TAILWIND_DIR := $(CURDIR)/.tools/tailwind/$(TAILWIND_VERSION)
+ifeq ($(OS),Windows_NT)
+  TAILWIND_ASSET := tailwindcss-windows-x64.exe
+  TAILWIND_BIN := $(TAILWIND_DIR)/tailwindcss.exe
+  TAILWIND_SHA256 := 55bc5a2e294520a74fe3523eaa11915ef50047e7228a545aa181ec413cf52612
+else
+  UNAME_S := $(shell uname -s)
+  UNAME_M := $(shell uname -m)
+  ifeq ($(UNAME_S),Darwin)
+    ifeq ($(UNAME_M),arm64)
+      TAILWIND_ASSET := tailwindcss-macos-arm64
+      TAILWIND_SHA256 := 7f27711dceac1a580b6ad58ddac46e59202c85a6c16f2f08f6fdcdee261008e1
+    else
+      TAILWIND_ASSET := tailwindcss-macos-x64
+      TAILWIND_SHA256 := 1e8a77fd796a3a4aa3d8727887de926ef9d38477aba113fd7c32c0d31a32a3ab
+    endif
+  else
+    ifeq ($(UNAME_M),aarch64)
+      TAILWIND_ASSET := tailwindcss-linux-arm64
+      TAILWIND_SHA256 := 7a7702db6c93718a9b6655d455304edda18600f5a4f195242342ed3b5b70ebe8
+    else
+      TAILWIND_ASSET := tailwindcss-linux-x64
+      TAILWIND_SHA256 := 737becf8d4ad1115ea98df69fa94026d402ca8feb91306a035b5b004167da8dd
+    endif
+  endif
+  TAILWIND_BIN := $(TAILWIND_DIR)/tailwindcss
+endif
+TAILWIND_URL := https://github.com/tailwindlabs/tailwindcss/releases/download/$(TAILWIND_VERSION)/$(TAILWIND_ASSET)
+
+.PHONY: help tools generate css lint test test-integration test-e2e cover build release-snapshot up down up-redis up-obs open-obs check-alerts deps demo check-generated
 
 help: ## list targets
 	@echo "Relay Make targets:"
 	@echo "  make help              - list targets (default)"
 	@echo "  make tools             - download modules; verify golangci-lint"
-	@echo "  make generate          - run sqlc + oapi-codegen + buf"
+	@echo "  make generate          - run sqlc + oapi-codegen + buf + templ"
+	@echo "  make css               - build Tailwind CSS (standalone CLI, checksum-verified)"
 	@echo "  make lint              - run golangci-lint"
 	@echo "  make test              - unit tests with -race"
 	@echo "  make test-integration  - integration tests (-tags=integration)"
@@ -60,7 +92,7 @@ tools: ## go mod download + verify golangci-lint
 	fi
 	$(GOLANGCI_LINT) version
 
-generate: ## sqlc + oapi-codegen + buf (skips when sources are missing)
+generate: ## sqlc + oapi-codegen + buf + templ (skips when sources are missing)
 	@if ls internal/adapter/storage/postgres/queries/*.sql >/dev/null 2>&1; then \
 		$(GO) tool sqlc generate; \
 	else \
@@ -76,6 +108,22 @@ generate: ## sqlc + oapi-codegen + buf (skips when sources are missing)
 	else \
 		echo "generate: skipping buf (proto sources missing)"; \
 	fi
+	@if ls internal/adapter/web/templates/*.templ >/dev/null 2>&1; then \
+		$(GO) tool templ generate ./internal/adapter/web/templates/; \
+	else \
+		echo "generate: skipping templ (no templates yet)"; \
+	fi
+
+$(TAILWIND_BIN):
+	@mkdir -p "$(TAILWIND_DIR)"
+	@echo "downloading Tailwind $(TAILWIND_VERSION) ($(TAILWIND_ASSET))..."
+	@curl -fsSL "$(TAILWIND_URL)" -o "$(TAILWIND_BIN).tmp"
+	@echo "$(TAILWIND_SHA256)  $(TAILWIND_BIN).tmp" | sha256sum -c -
+	@mv "$(TAILWIND_BIN).tmp" "$(TAILWIND_BIN)"
+	@chmod +x "$(TAILWIND_BIN)" || true
+
+css: $(TAILWIND_BIN) ## compile Tailwind CSS into embedded static/app.css
+	"$(TAILWIND_BIN)" -i internal/adapter/web/css/input.css -o internal/adapter/web/static/app.css --minify
 
 lint: ## golangci-lint run ./...
 	$(GOLANGCI_LINT) run ./...
@@ -150,8 +198,14 @@ demo: up ## run demo producer
 	COMPOSE_GOPROXY=$(COMPOSE_GOPROXY) docker compose --profile demo build example-producer
 	COMPOSE_GOPROXY=$(COMPOSE_GOPROXY) docker compose --profile demo run --rm --no-deps example-producer
 
-check-generated: generate ## fail if generated files drift
-	@git diff --exit-code -- internal/adapter/storage/postgres/sqlcgen internal/adapter/http/oapi gen/relay/v1 || ( \
-		echo "generated files are dirty; run make generate and commit"; \
+check-generated: generate css ## fail if generated files drift
+	@git diff --exit-code -- \
+		internal/adapter/storage/postgres/sqlcgen \
+		internal/adapter/http/oapi \
+		gen/relay/v1 \
+		internal/adapter/web/templates \
+		internal/adapter/web/static/app.css \
+		|| ( \
+		echo "generated files are dirty; run make generate && make css and commit"; \
 		exit 1; \
 	)

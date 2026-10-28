@@ -6,9 +6,10 @@ import "time"
 type Scope string
 
 const (
-	ScopeProducer Scope = "producer" // enqueue, get job
-	ScopeWorker   Scope = "worker"   // lease, heartbeat, complete, fail, release
-	ScopeAdmin    Scope = "admin"    // everything incl. queues, schedules, keys
+	ScopeProducer      Scope = "producer"       // enqueue, get job
+	ScopeWorker        Scope = "worker"         // lease, heartbeat, complete, fail, release
+	ScopeAdmin         Scope = "admin"          // everything incl. queues, schedules, keys
+	ScopeDashboardRead Scope = "dashboard:read" // dashboard read-only (admin implies)
 )
 
 // APIKey is the persisted representation of a credential (secret shown once at creation).

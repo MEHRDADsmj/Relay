@@ -29,6 +29,7 @@ import (
 	"github.com/MEHRDADsmj/relay/internal/adapter/metrics/prom"
 	"github.com/MEHRDADsmj/relay/internal/adapter/storage/postgres"
 	redisstore "github.com/MEHRDADsmj/relay/internal/adapter/storage/redis"
+	"github.com/MEHRDADsmj/relay/internal/adapter/web"
 	"github.com/MEHRDADsmj/relay/internal/app"
 	"github.com/MEHRDADsmj/relay/internal/domain"
 	"github.com/MEHRDADsmj/relay/internal/platform/config"
@@ -195,13 +196,34 @@ func runServe() error {
 	cronParser := adaptercron.NewParser()
 	schedules := app.NewScheduleService(scheduleRepo, svc, cronParser, clock, app.UUIDv7Generator{})
 	apiKeys := app.NewAPIKeyService(apiKeyRepo, clock)
-	handler := adapterhttp.NewRouter(svc, queues, schedules, apiKeys, adapterhttp.Options{
+	apiHandler := adapterhttp.NewRouter(svc, queues, schedules, apiKeys, adapterhttp.Options{
 		APIKey:  cfg.APIKey,
 		Auth:    auth,
 		Logger:  log,
 		Metrics: httpMetrics.Middleware,
 		Tracing: true,
 	})
+	handler := http.Handler(apiHandler)
+	if cfg.UIEnabled {
+		uiSrv, sessionKey, err := web.New(web.Options{
+			Auth:          auth,
+			Logger:        log,
+			SessionKey:    cfg.UISessionKey,
+			SecureCookies: cfg.UISecureCookies,
+		})
+		if err != nil {
+			return fmt.Errorf("web ui: %w", err)
+		}
+		if len(cfg.UISessionKey) == 0 {
+			log.WarnContext(ctx, "RELAY_UI_SESSION_KEY unset; generated ephemeral key for this process",
+				"hint", "set RELAY_UI_SESSION_KEY to a base64-encoded 32-byte key to persist sessions across restarts",
+				"generated_key_base64", web.EncodeSessionKey(sessionKey),
+			)
+		}
+		handler = web.Mount(apiHandler, uiSrv.Handler())
+	} else {
+		log.InfoContext(ctx, "web ui disabled")
+	}
 
 	maint := app.NewMaintenance(mustMaintenanceRepo(repo), clock, app.MaintenanceConfig{
 		ReapInterval:   cfg.ReapInterval,

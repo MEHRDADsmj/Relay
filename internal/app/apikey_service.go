@@ -91,7 +91,7 @@ func validateScopes(scopes []domain.Scope) error {
 	}
 	for _, sc := range scopes {
 		switch sc {
-		case domain.ScopeProducer, domain.ScopeWorker, domain.ScopeAdmin:
+		case domain.ScopeProducer, domain.ScopeWorker, domain.ScopeAdmin, domain.ScopeDashboardRead:
 		default:
 			return &domain.ValidationError{Field: "scopes", Message: "unknown scope: " + string(sc)}
 		}

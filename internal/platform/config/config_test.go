@@ -43,6 +43,10 @@ func TestLoad_Defaults(t *testing.T) {
 	require.Equal(t, "development", cfg.Environment)
 	require.InDelta(t, 0.1, cfg.TraceSampleRatio, 1e-9)
 	require.Empty(t, cfg.OTLPEndpoint)
+	require.True(t, cfg.UIEnabled)
+	require.Nil(t, cfg.UISessionKey)
+	require.False(t, cfg.UISecureCookies)
+	require.Empty(t, cfg.UITraceURLTemplate)
 }
 
 func TestLoad_RedisRequiresURL(t *testing.T) {
@@ -219,6 +223,10 @@ func clearOptional(t *testing.T) {
 		"RELAY_ENVIRONMENT",
 		"RELAY_TRACE_SAMPLE_RATIO",
 		"OTEL_EXPORTER_OTLP_ENDPOINT",
+		"RELAY_UI_ENABLED",
+		"RELAY_UI_SESSION_KEY",
+		"RELAY_UI_SECURE_COOKIES",
+		"RELAY_UI_TRACE_URL_TEMPLATE",
 	} {
 		t.Setenv(k, "")
 	}

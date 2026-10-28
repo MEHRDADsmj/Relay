@@ -132,6 +132,57 @@ func (s *AuthService) Authenticate(ctx context.Context, secret string) (domain.P
 	return p, nil
 }
 
+// PrincipalByKeyID re-validates a session by API key ID (no secret).
+// Bootstrap sessions use KeyID "bootstrap" and remain valid while the bootstrap key is set.
+// Results are cached by key ID for CacheTTL (revocation applies after TTL).
+func (s *AuthService) PrincipalByKeyID(ctx context.Context, keyID string) (domain.Principal, error) {
+	if keyID == "" {
+		return domain.Principal{}, domain.ErrUnauthenticated
+	}
+	now := s.clock.Now()
+	cacheKey := "id:" + keyID
+
+	s.mu.Lock()
+	if e := s.cacheGetLocked(cacheKey, now); e != nil {
+		s.mu.Unlock()
+		if e.negative {
+			return domain.Principal{}, domain.ErrUnauthenticated
+		}
+		return e.principal, nil
+	}
+	s.mu.Unlock()
+
+	if keyID == BootstrapAdmin.KeyID {
+		if s.bootstrapKey == "" {
+			s.putCache(cacheKey, domain.Principal{}, true, now)
+			return domain.Principal{}, domain.ErrUnauthenticated
+		}
+		s.putCache(cacheKey, BootstrapAdmin, false, now)
+		return BootstrapAdmin, nil
+	}
+
+	key, err := s.repo.GetAPIKey(ctx, keyID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			s.putCache(cacheKey, domain.Principal{}, true, now)
+			return domain.Principal{}, domain.ErrUnauthenticated
+		}
+		return domain.Principal{}, fmt.Errorf("lookup api key by id: %w", err)
+	}
+	if key.RevokedAt != nil {
+		s.putCache(cacheKey, domain.Principal{}, true, now)
+		return domain.Principal{}, domain.ErrUnauthenticated
+	}
+	if key.ExpiresAt != nil && !key.ExpiresAt.After(now) {
+		s.putCache(cacheKey, domain.Principal{}, true, now)
+		return domain.Principal{}, domain.ErrUnauthenticated
+	}
+
+	p := domain.Principal{KeyID: key.ID, Name: key.Name, Scopes: append([]domain.Scope(nil), key.Scopes...)}
+	s.putCache(cacheKey, p, false, now)
+	return p, nil
+}
+
 // AuthDisabled reports whether neither bootstrap nor stored keys are configured.
 // hasKeys should be true when at least one stored key exists.
 func (s *AuthService) AuthDisabled(hasKeys bool) bool {

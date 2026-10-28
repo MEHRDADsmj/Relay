@@ -247,6 +247,8 @@ func scopesFromProto(scopes []relayv1.Scope) []string {
 			out = append(out, ScopeWorker)
 		case relayv1.Scope_SCOPE_ADMIN:
 			out = append(out, ScopeAdmin)
+		case relayv1.Scope_SCOPE_DASHBOARD_READ:
+			out = append(out, ScopeDashboardRead)
 		}
 	}
 	return out
@@ -262,6 +264,8 @@ func scopesToProto(scopes []string) ([]relayv1.Scope, error) {
 			out = append(out, relayv1.Scope_SCOPE_WORKER)
 		case ScopeAdmin:
 			out = append(out, relayv1.Scope_SCOPE_ADMIN)
+		case ScopeDashboardRead:
+			out = append(out, relayv1.Scope_SCOPE_DASHBOARD_READ)
 		default:
 			return nil, fmt.Errorf("relay: unknown scope %q", s)
 		}

@@ -195,6 +195,8 @@ func scopeToProto(s domain.Scope) relayv1.Scope {
 		return relayv1.Scope_SCOPE_WORKER
 	case domain.ScopeAdmin:
 		return relayv1.Scope_SCOPE_ADMIN
+	case domain.ScopeDashboardRead:
+		return relayv1.Scope_SCOPE_DASHBOARD_READ
 	default:
 		return relayv1.Scope_SCOPE_UNSPECIFIED
 	}
@@ -208,6 +210,8 @@ func scopeFromProto(s relayv1.Scope) (domain.Scope, bool) {
 		return domain.ScopeWorker, true
 	case relayv1.Scope_SCOPE_ADMIN:
 		return domain.ScopeAdmin, true
+	case relayv1.Scope_SCOPE_DASHBOARD_READ:
+		return domain.ScopeDashboardRead, true
 	default:
 		return "", false
 	}

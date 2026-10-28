@@ -86,9 +86,10 @@ type ListJobsOptions struct {
 
 // Scope names for API keys (OpenAPI / proto parity).
 const (
-	ScopeProducer = "producer"
-	ScopeWorker   = "worker"
-	ScopeAdmin    = "admin"
+	ScopeProducer      = "producer"
+	ScopeWorker        = "worker"
+	ScopeAdmin         = "admin"
+	ScopeDashboardRead = "dashboard:read"
 )
 
 // ScheduleInfo is a cron schedule as returned by the API.

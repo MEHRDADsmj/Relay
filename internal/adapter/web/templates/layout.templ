@@ -1,0 +1,51 @@
+package templates
+
+import "encoding/json"
+
+templ Layout(title string, csrf string, loggedIn bool, body templ.Component) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			if csrf != "" {
+				<meta name="csrf-token" content={ csrf }/>
+			}
+			<title>{ title } · Relay</title>
+			<link rel="stylesheet" href="/ui/static/app.css"/>
+			<script src="/ui/static/htmx.min.js" defer></script>
+			<script src="/ui/static/htmx-ext-sse.js" defer></script>
+		</head>
+		<body class="min-h-screen" hx-headers={ csrfHXHeaders(csrf) }>
+			<a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2 dark:focus:bg-zinc-900">Skip to content</a>
+			<header class="border-b border-zinc-200 bg-white/80 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/80">
+				<div class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
+					<a href="/ui/" class="text-lg font-semibold tracking-tight text-zinc-900 no-underline dark:text-zinc-50">Relay</a>
+					if loggedIn {
+						<nav aria-label="Primary" class="flex items-center gap-4 text-sm">
+							<a href="/ui/" class="no-underline text-zinc-700 dark:text-zinc-300">Overview</a>
+							<form method="post" action="/ui/logout" class="inline">
+								<input type="hidden" name="csrf" value={ csrf }/>
+								<button type="submit" class="cursor-pointer rounded border border-zinc-300 px-2 py-1 text-zinc-700 dark:border-zinc-700 dark:text-zinc-300">Log out</button>
+							</form>
+						</nav>
+					}
+				</div>
+			</header>
+			<main id="main" class="mx-auto max-w-6xl px-4 py-8">
+				@body
+			</main>
+		</body>
+	</html>
+}
+
+func csrfHXHeaders(csrf string) string {
+	if csrf == "" {
+		return "{}"
+	}
+	b, err := json.Marshal(map[string]string{"X-CSRF-Token": csrf})
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}

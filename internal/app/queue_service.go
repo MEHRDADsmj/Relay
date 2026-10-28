@@ -30,7 +30,7 @@ func NewQueueService(queues QueueRepository, jobs JobRepository, stats StatsRepo
 
 // ListQueues returns all registered queues.
 func (s *QueueService) ListQueues(ctx context.Context) ([]domain.Queue, error) {
-	if err := RequireScope(ctx, domain.ScopeAdmin); err != nil {
+	if err := RequireScope(ctx, domain.ScopeDashboardRead); err != nil {
 		return nil, err
 	}
 	return s.queues.ListQueues(ctx)
@@ -38,7 +38,7 @@ func (s *QueueService) ListQueues(ctx context.Context) ([]domain.Queue, error) {
 
 // Stats returns aggregate counts for a queue.
 func (s *QueueService) Stats(ctx context.Context, queue string) (domain.QueueStats, error) {
-	if err := RequireScope(ctx, domain.ScopeAdmin); err != nil {
+	if err := RequireScope(ctx, domain.ScopeDashboardRead); err != nil {
 		return domain.QueueStats{}, err
 	}
 	if err := domain.ValidateQueue(queue); err != nil {
@@ -49,7 +49,7 @@ func (s *QueueService) Stats(ctx context.Context, queue string) (domain.QueueSta
 
 // Throughput returns zero-filled minutely counters for window ∈ {15m, 1h, 24h}.
 func (s *QueueService) Throughput(ctx context.Context, queue string, window time.Duration) ([]domain.ThroughputPoint, error) {
-	if err := RequireScope(ctx, domain.ScopeAdmin); err != nil {
+	if err := RequireScope(ctx, domain.ScopeDashboardRead); err != nil {
 		return nil, err
 	}
 	if err := domain.ValidateQueue(queue); err != nil {

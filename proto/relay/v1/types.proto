@@ -33,6 +33,7 @@ enum Scope {
   SCOPE_PRODUCER = 1;
   SCOPE_WORKER = 2;
   SCOPE_ADMIN = 3;
+  SCOPE_DASHBOARD_READ = 4;
 }
 
 // Job is the job resource.

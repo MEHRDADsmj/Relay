@@ -89,12 +89,16 @@ func TestScopeMatrix(t *testing.T) {
 		{"JobService.Ready", "", func(ctx context.Context) error {
 			return js.Ready(ctx)
 		}, true},
-		{"QueueService.ListQueues", domain.ScopeAdmin, func(ctx context.Context) error {
+		{"QueueService.ListQueues", domain.ScopeDashboardRead, func(ctx context.Context) error {
 			_, err := qs.ListQueues(ctx)
 			return err
 		}, false},
-		{"QueueService.Stats", domain.ScopeAdmin, func(ctx context.Context) error {
+		{"QueueService.Stats", domain.ScopeDashboardRead, func(ctx context.Context) error {
 			_, err := qs.Stats(ctx, "default")
+			return err
+		}, false},
+		{"QueueService.Throughput", domain.ScopeDashboardRead, func(ctx context.Context) error {
+			_, err := qs.Throughput(ctx, "default", app.ThroughputWindow15m)
 			return err
 		}, false},
 		{"QueueService.Pause", domain.ScopeAdmin, func(ctx context.Context) error {
@@ -159,9 +163,10 @@ func TestScopeMatrix(t *testing.T) {
 	}
 
 	wrongScope := map[domain.Scope]domain.Scope{
-		domain.ScopeProducer: domain.ScopeWorker,
-		domain.ScopeWorker:   domain.ScopeProducer,
-		domain.ScopeAdmin:    domain.ScopeProducer,
+		domain.ScopeProducer:      domain.ScopeWorker,
+		domain.ScopeWorker:        domain.ScopeProducer,
+		domain.ScopeAdmin:         domain.ScopeProducer,
+		domain.ScopeDashboardRead: domain.ScopeProducer,
 	}
 
 	for _, c := range checks {

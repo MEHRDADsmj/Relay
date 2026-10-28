@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"strconv"
@@ -31,38 +32,42 @@ const (
 
 // Config holds relay-server settings loaded from the environment.
 type Config struct {
-	HTTPAddr         string
-	GRPCAddr         string
-	AdminAddr        string
-	MetricsMaxSeries int
-	GRPCReflection   bool
-	Storage          string
-	PostgresURL      string
-	RedisURL         string
-	RedisKeyPrefix   string
-	MigrateOnStart   bool
-	APIKey           string
-	AuthCacheTTL     time.Duration
-	RetryPolicy      string
-	RetryBase        time.Duration
-	RetryMax         time.Duration
-	RetryDelay       time.Duration // legacy alias for fixed delay / RetryBase override
-	ReapInterval     time.Duration
-	ReapBatch        int
-	PurgeInterval    time.Duration
-	PurgeBatch       int
-	Retention        time.Duration
-	StatsRetention   time.Duration
-	LeaseMaxWait     time.Duration
-	ShutdownTimeout  time.Duration
-	SchedulerEnabled bool
-	SchedulerTick    time.Duration
-	InstanceID       string
-	LogLevel         string
-	LogFormat        string
-	Environment      string
-	TraceSampleRatio float64
-	OTLPEndpoint     string
+	HTTPAddr           string
+	GRPCAddr           string
+	AdminAddr          string
+	MetricsMaxSeries   int
+	GRPCReflection     bool
+	Storage            string
+	PostgresURL        string
+	RedisURL           string
+	RedisKeyPrefix     string
+	MigrateOnStart     bool
+	APIKey             string
+	AuthCacheTTL       time.Duration
+	RetryPolicy        string
+	RetryBase          time.Duration
+	RetryMax           time.Duration
+	RetryDelay         time.Duration // legacy alias for fixed delay / RetryBase override
+	ReapInterval       time.Duration
+	ReapBatch          int
+	PurgeInterval      time.Duration
+	PurgeBatch         int
+	Retention          time.Duration
+	StatsRetention     time.Duration
+	LeaseMaxWait       time.Duration
+	ShutdownTimeout    time.Duration
+	SchedulerEnabled   bool
+	SchedulerTick      time.Duration
+	InstanceID         string
+	LogLevel           string
+	LogFormat          string
+	Environment        string
+	TraceSampleRatio   float64
+	OTLPEndpoint       string
+	UIEnabled          bool
+	UISessionKey       []byte // 32-byte AES key; nil if unset (dev generates)
+	UISecureCookies    bool
+	UITraceURLTemplate string
 }
 
 // Load reads configuration from environment variables and validates it.
@@ -93,16 +98,27 @@ func Load() (Config, error) {
 		StatsRetention:   48 * time.Hour,
 		LeaseMaxWait:     30 * time.Second,
 		// ShutdownTimeout default = LeaseMaxWait + 15s margin (BaseContext still cancels long-polls on SIGTERM).
-		ShutdownTimeout:  45 * time.Second,
-		SchedulerEnabled: true,
-		SchedulerTick:    time.Second,
-		InstanceID:       envOr("RELAY_INSTANCE_ID", defaultInstanceID()),
-		Environment:      envOr("RELAY_ENVIRONMENT", "development"),
-		TraceSampleRatio: 0.1,
-		OTLPEndpoint:     os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		ShutdownTimeout:    45 * time.Second,
+		SchedulerEnabled:   true,
+		SchedulerTick:      time.Second,
+		InstanceID:         envOr("RELAY_INSTANCE_ID", defaultInstanceID()),
+		Environment:        envOr("RELAY_ENVIRONMENT", "development"),
+		TraceSampleRatio:   0.1,
+		OTLPEndpoint:       os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		UIEnabled:          true,
+		UITraceURLTemplate: os.Getenv("RELAY_UI_TRACE_URL_TEMPLATE"),
 	}
 
 	var errs []string
+
+	if v := os.Getenv("RELAY_UI_ENABLED"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("RELAY_UI_ENABLED: invalid bool %q", v))
+		} else {
+			cfg.UIEnabled = b
+		}
+	}
 
 	if v := os.Getenv("RELAY_MIGRATE_ON_START"); v != "" {
 		b, err := strconv.ParseBool(v)
@@ -356,6 +372,32 @@ func Load() (Config, error) {
 	}
 	if cfg.InstanceID == "" {
 		errs = append(errs, "RELAY_INSTANCE_ID: must not be empty")
+	}
+
+	// Secure cookies: default false in development, true in production (override via env).
+	cfg.UISecureCookies = strings.EqualFold(cfg.Environment, "production")
+	if v := os.Getenv("RELAY_UI_SECURE_COOKIES"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("RELAY_UI_SECURE_COOKIES: invalid bool %q", v))
+		} else {
+			cfg.UISecureCookies = b
+		}
+	}
+
+	switch v := os.Getenv("RELAY_UI_SESSION_KEY"); {
+	case v != "":
+		key, err := base64.StdEncoding.DecodeString(v)
+		switch {
+		case err != nil:
+			errs = append(errs, fmt.Sprintf("RELAY_UI_SESSION_KEY: invalid base64: %v", err))
+		case len(key) != 32:
+			errs = append(errs, fmt.Sprintf("RELAY_UI_SESSION_KEY: must decode to 32 bytes, got %d", len(key)))
+		default:
+			cfg.UISessionKey = key
+		}
+	case cfg.UIEnabled && strings.EqualFold(cfg.Environment, "production"):
+		errs = append(errs, "RELAY_UI_SESSION_KEY: required when RELAY_ENVIRONMENT=production and UI is enabled")
 	}
 
 	if len(errs) > 0 {

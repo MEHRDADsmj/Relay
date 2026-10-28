@@ -98,10 +98,10 @@ func parseScopesCSV(csv string) ([]domain.Scope, error) {
 		}
 		sc := domain.Scope(p)
 		switch sc {
-		case domain.ScopeProducer, domain.ScopeWorker, domain.ScopeAdmin:
+		case domain.ScopeProducer, domain.ScopeWorker, domain.ScopeAdmin, domain.ScopeDashboardRead:
 			out = append(out, sc)
 		default:
-			return nil, fmt.Errorf("unknown scope %q (want producer|worker|admin)", p)
+			return nil, fmt.Errorf("unknown scope %q (want producer|worker|admin|dashboard:read)", p)
 		}
 	}
 	if len(out) == 0 {

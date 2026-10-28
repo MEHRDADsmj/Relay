@@ -147,10 +147,11 @@ func (AttemptOutcome) EnumDescriptor() ([]byte, []int) {
 type Scope int32
 
 const (
-	Scope_SCOPE_UNSPECIFIED Scope = 0
-	Scope_SCOPE_PRODUCER    Scope = 1
-	Scope_SCOPE_WORKER      Scope = 2
-	Scope_SCOPE_ADMIN       Scope = 3
+	Scope_SCOPE_UNSPECIFIED    Scope = 0
+	Scope_SCOPE_PRODUCER       Scope = 1
+	Scope_SCOPE_WORKER         Scope = 2
+	Scope_SCOPE_ADMIN          Scope = 3
+	Scope_SCOPE_DASHBOARD_READ Scope = 4
 )
 
 // Enum value maps for Scope.
@@ -160,12 +161,14 @@ var (
 		1: "SCOPE_PRODUCER",
 		2: "SCOPE_WORKER",
 		3: "SCOPE_ADMIN",
+		4: "SCOPE_DASHBOARD_READ",
 	}
 	Scope_value = map[string]int32{
-		"SCOPE_UNSPECIFIED": 0,
-		"SCOPE_PRODUCER":    1,
-		"SCOPE_WORKER":      2,
-		"SCOPE_ADMIN":       3,
+		"SCOPE_UNSPECIFIED":    0,
+		"SCOPE_PRODUCER":       1,
+		"SCOPE_WORKER":         2,
+		"SCOPE_ADMIN":          3,
+		"SCOPE_DASHBOARD_READ": 4,
 	}
 )
 
@@ -1024,12 +1027,13 @@ const file_relay_v1_types_proto_rawDesc = "" +
 	"\x16ATTEMPT_OUTCOME_FAILED\x10\x03\x12\x1b\n" +
 	"\x17ATTEMPT_OUTCOME_EXPIRED\x10\x04\x12\x1c\n" +
 	"\x18ATTEMPT_OUTCOME_RELEASED\x10\x05\x12\x1d\n" +
-	"\x19ATTEMPT_OUTCOME_CANCELLED\x10\x06*U\n" +
+	"\x19ATTEMPT_OUTCOME_CANCELLED\x10\x06*o\n" +
 	"\x05Scope\x12\x15\n" +
 	"\x11SCOPE_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eSCOPE_PRODUCER\x10\x01\x12\x10\n" +
 	"\fSCOPE_WORKER\x10\x02\x12\x0f\n" +
-	"\vSCOPE_ADMIN\x10\x03B2Z0github.com/MEHRDADsmj/relay/gen/relay/v1;relayv1b\x06proto3"
+	"\vSCOPE_ADMIN\x10\x03\x12\x18\n" +
+	"\x14SCOPE_DASHBOARD_READ\x10\x04B2Z0github.com/MEHRDADsmj/relay/gen/relay/v1;relayv1b\x06proto3"
 
 var (
 	file_relay_v1_types_proto_rawDescOnce sync.Once
