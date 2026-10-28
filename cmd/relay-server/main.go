@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -86,19 +87,28 @@ func runServe() error {
 	}
 
 	clock := app.SystemClock{}
+	notifier := mustNotifier(repo)
 	svc := app.NewJobService(
 		repo,
 		clock,
 		app.UUIDv7Generator{},
-		app.FixedDelayRetryPolicy{Delay: cfg.RetryDelay},
+		newRetryPolicy(cfg),
 		log,
-		nil, // notifier wired in P2-T7
+		notifier,
 	)
 	queues := app.NewQueueService(mustQueueRepo(repo), repo, clock)
 	handler := adapterhttp.NewRouter(svc, queues, adapterhttp.Options{
 		APIKey: cfg.APIKey,
 		Logger: log,
 	})
+
+	maint := app.NewMaintenance(mustMaintenanceRepo(repo), clock, app.MaintenanceConfig{
+		ReapInterval:  cfg.ReapInterval,
+		ReapBatch:     cfg.ReapBatch,
+		PurgeInterval: cfg.PurgeInterval,
+		PurgeBatch:    cfg.PurgeBatch,
+		Retention:     cfg.Retention,
+	}, log)
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -110,6 +120,11 @@ func runServe() error {
 		IdleTimeout:  60 * time.Second,
 	}
 
+	// Maintenance uses a child context cancelled only after HTTP shutdown so
+	// long-polls can finish before the reaper/purger stops (phase-2 §7).
+	maintCtx, maintCancel := context.WithCancel(context.Background())
+	defer maintCancel()
+
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		log.Info("http server listening", "addr", cfg.HTTPAddr, "storage", cfg.Storage)
@@ -120,13 +135,24 @@ func runServe() error {
 		return nil
 	})
 	g.Go(func() error {
+		err := maint.Run(maintCtx)
+		if err == nil || errors.Is(err, context.Canceled) {
+			return nil
+		}
+		return fmt.Errorf("maintenance: %w", err)
+	})
+	g.Go(func() error {
 		<-gctx.Done()
+		// 1–2: stop accepting HTTP; Shutdown waits for in-flight handlers (incl. long-polls).
 		shCtx, cancel := context.WithTimeout(context.WithoutCancel(gctx), cfg.ShutdownTimeout)
 		defer cancel()
 		log.Info("shutting down http server", "timeout", cfg.ShutdownTimeout)
 		if err := srv.Shutdown(shCtx); err != nil {
+			maintCancel()
 			return fmt.Errorf("shutdown: %w", err)
 		}
+		// 3: stop maintenance (4–5: notifier + storage close in deferred cleanup).
+		maintCancel()
 		return nil
 	})
 
@@ -135,6 +161,19 @@ func runServe() error {
 	}
 	log.Info("server stopped")
 	return nil
+}
+
+func newRetryPolicy(cfg config.Config) app.RetryPolicy {
+	switch cfg.RetryPolicy {
+	case config.RetryPolicyFixed:
+		return app.FixedDelayRetryPolicy{Delay: cfg.RetryBase}
+	default:
+		return app.ExponentialJitterPolicy{
+			Base: cfg.RetryBase,
+			Max:  cfg.RetryMax,
+			Rand: rand.Float64,
+		}
+	}
 }
 
 func openRepository(ctx context.Context, cfg config.Config, log *slog.Logger) (app.JobRepository, func(), error) {
@@ -167,6 +206,22 @@ func mustQueueRepo(repo app.JobRepository) app.QueueRepository {
 		panic(fmt.Sprintf("%T does not implement app.QueueRepository", repo))
 	}
 	return q
+}
+
+func mustMaintenanceRepo(repo app.JobRepository) app.MaintenanceRepository {
+	m, ok := repo.(app.MaintenanceRepository)
+	if !ok {
+		panic(fmt.Sprintf("%T does not implement app.MaintenanceRepository", repo))
+	}
+	return m
+}
+
+func mustNotifier(repo app.JobRepository) app.JobNotifier {
+	n, ok := repo.(app.JobNotifier)
+	if !ok {
+		panic(fmt.Sprintf("%T does not implement app.JobNotifier", repo))
+	}
+	return n
 }
 
 func migrateOnStart(ctx context.Context, cfg config.Config, log *slog.Logger) error {
