@@ -12,6 +12,90 @@ import (
 	"github.com/google/uuid"
 )
 
+const cancelPendingJob = `-- name: CancelPendingJob :one
+UPDATE jobs
+SET
+    status = 'cancelled',
+    finished_at = $1::timestamptz,
+    cancelled_at = $1::timestamptz,
+    updated_at = $1::timestamptz
+WHERE id = $2
+  AND status = 'pending'
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+`
+
+type CancelPendingJobParams struct {
+	Now time.Time
+	ID  uuid.UUID
+}
+
+func (q *Queries) CancelPendingJob(ctx context.Context, arg CancelPendingJobParams) (Job, error) {
+	row := q.db.QueryRow(ctx, cancelPendingJob, arg.Now, arg.ID)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Queue,
+		&i.Type,
+		&i.Payload,
+		&i.Status,
+		&i.Priority,
+		&i.RunAt,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.LeaseOwner,
+		&i.LeaseExpiresAt,
+		&i.IdempotencyKey,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+		&i.CancelRequested,
+		&i.CancelledAt,
+	)
+	return i, err
+}
+
+const cancelRunningJob = `-- name: CancelRunningJob :one
+UPDATE jobs
+SET
+    cancel_requested = true,
+    updated_at = $1::timestamptz
+WHERE id = $2
+  AND status = 'running'
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+`
+
+type CancelRunningJobParams struct {
+	Now time.Time
+	ID  uuid.UUID
+}
+
+func (q *Queries) CancelRunningJob(ctx context.Context, arg CancelRunningJobParams) (Job, error) {
+	row := q.db.QueryRow(ctx, cancelRunningJob, arg.Now, arg.ID)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Queue,
+		&i.Type,
+		&i.Payload,
+		&i.Status,
+		&i.Priority,
+		&i.RunAt,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.LeaseOwner,
+		&i.LeaseExpiresAt,
+		&i.IdempotencyKey,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+		&i.CancelRequested,
+		&i.CancelledAt,
+	)
+	return i, err
+}
+
 const claimJobs = `-- name: ClaimJobs :many
 UPDATE jobs AS j
 SET
@@ -35,7 +119,7 @@ WHERE j.id IN (
     FOR UPDATE SKIP LOCKED
     LIMIT $5
 )
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
 `
 
 type ClaimJobsParams struct {
@@ -78,6 +162,8 @@ func (q *Queries) ClaimJobs(ctx context.Context, arg ClaimJobsParams) ([]Job, er
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.FinishedAt,
+			&i.CancelRequested,
+			&i.CancelledAt,
 		); err != nil {
 			return nil, err
 		}
@@ -89,29 +175,32 @@ func (q *Queries) ClaimJobs(ctx context.Context, arg ClaimJobsParams) ([]Job, er
 	return items, nil
 }
 
-const completeJob = `-- name: CompleteJob :one
+const completeJobCancelled = `-- name: CompleteJobCancelled :one
 UPDATE jobs
 SET
-    status = 'succeeded',
+    status = 'cancelled',
     finished_at = $1::timestamptz,
+    cancelled_at = $1::timestamptz,
     lease_owner = NULL,
     lease_expires_at = NULL,
+    cancel_requested = false,
     updated_at = $1::timestamptz
 WHERE id = $2
   AND status = 'running'
   AND lease_owner = $3
   AND lease_expires_at > $1::timestamptz
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at
+  AND cancel_requested = true
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
 `
 
-type CompleteJobParams struct {
+type CompleteJobCancelledParams struct {
 	Now   time.Time
 	ID    uuid.UUID
 	Owner *string
 }
 
-func (q *Queries) CompleteJob(ctx context.Context, arg CompleteJobParams) (Job, error) {
-	row := q.db.QueryRow(ctx, completeJob, arg.Now, arg.ID, arg.Owner)
+func (q *Queries) CompleteJobCancelled(ctx context.Context, arg CompleteJobCancelledParams) (Job, error) {
+	row := q.db.QueryRow(ctx, completeJobCancelled, arg.Now, arg.ID, arg.Owner)
 	var i Job
 	err := row.Scan(
 		&i.ID,
@@ -130,6 +219,57 @@ func (q *Queries) CompleteJob(ctx context.Context, arg CompleteJobParams) (Job, 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.CancelRequested,
+		&i.CancelledAt,
+	)
+	return i, err
+}
+
+const completeJobSucceeded = `-- name: CompleteJobSucceeded :one
+UPDATE jobs
+SET
+    status = 'succeeded',
+    finished_at = $1::timestamptz,
+    lease_owner = NULL,
+    lease_expires_at = NULL,
+    cancel_requested = false,
+    updated_at = $1::timestamptz
+WHERE id = $2
+  AND status = 'running'
+  AND lease_owner = $3
+  AND lease_expires_at > $1::timestamptz
+  AND cancel_requested = false
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+`
+
+type CompleteJobSucceededParams struct {
+	Now   time.Time
+	ID    uuid.UUID
+	Owner *string
+}
+
+func (q *Queries) CompleteJobSucceeded(ctx context.Context, arg CompleteJobSucceededParams) (Job, error) {
+	row := q.db.QueryRow(ctx, completeJobSucceeded, arg.Now, arg.ID, arg.Owner)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Queue,
+		&i.Type,
+		&i.Payload,
+		&i.Status,
+		&i.Priority,
+		&i.RunAt,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.LeaseOwner,
+		&i.LeaseExpiresAt,
+		&i.IdempotencyKey,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+		&i.CancelRequested,
+		&i.CancelledAt,
 	)
 	return i, err
 }
@@ -149,34 +289,38 @@ INSERT INTO jobs (
     lease_expires_at,
     idempotency_key,
     last_error,
+    cancel_requested,
+    cancelled_at,
     created_at,
     updated_at,
     finished_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
 )
 ON CONFLICT (queue, idempotency_key) WHERE idempotency_key IS NOT NULL
 DO NOTHING
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
 `
 
 type CreateJobParams struct {
-	ID             uuid.UUID
-	Queue          string
-	Type           string
-	Payload        []byte
-	Status         string
-	Priority       int16
-	RunAt          time.Time
-	Attempts       int32
-	MaxAttempts    int32
-	LeaseOwner     *string
-	LeaseExpiresAt *time.Time
-	IdempotencyKey *string
-	LastError      *string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	FinishedAt     *time.Time
+	ID              uuid.UUID
+	Queue           string
+	Type            string
+	Payload         []byte
+	Status          string
+	Priority        int16
+	RunAt           time.Time
+	Attempts        int32
+	MaxAttempts     int32
+	LeaseOwner      *string
+	LeaseExpiresAt  *time.Time
+	IdempotencyKey  *string
+	LastError       *string
+	CancelRequested bool
+	CancelledAt     *time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	FinishedAt      *time.Time
 }
 
 func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, error) {
@@ -194,6 +338,8 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, erro
 		arg.LeaseExpiresAt,
 		arg.IdempotencyKey,
 		arg.LastError,
+		arg.CancelRequested,
+		arg.CancelledAt,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.FinishedAt,
@@ -216,8 +362,20 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, erro
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.CancelRequested,
+		&i.CancelledAt,
 	)
 	return i, err
+}
+
+const deleteJobsByIDs = `-- name: DeleteJobsByIDs :exec
+DELETE FROM jobs
+WHERE id = ANY($1::uuid[])
+`
+
+func (q *Queries) DeleteJobsByIDs(ctx context.Context, ids []uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteJobsByIDs, ids)
+	return err
 }
 
 const extendLease = `-- name: ExtendLease :one
@@ -229,7 +387,7 @@ WHERE id = $3
   AND status = 'running'
   AND lease_owner = $4
   AND lease_expires_at > $2::timestamptz
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
 `
 
 type ExtendLeaseParams struct {
@@ -264,6 +422,65 @@ func (q *Queries) ExtendLease(ctx context.Context, arg ExtendLeaseParams) (Job, 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.CancelRequested,
+		&i.CancelledAt,
+	)
+	return i, err
+}
+
+const failJobCancelled = `-- name: FailJobCancelled :one
+UPDATE jobs
+SET
+    status = 'cancelled',
+    finished_at = $1::timestamptz,
+    cancelled_at = $1::timestamptz,
+    last_error = $2,
+    lease_owner = NULL,
+    lease_expires_at = NULL,
+    cancel_requested = false,
+    updated_at = $1::timestamptz
+WHERE id = $3
+  AND status = 'running'
+  AND lease_owner = $4
+  AND lease_expires_at > $1::timestamptz
+  AND cancel_requested = true
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+`
+
+type FailJobCancelledParams struct {
+	Now       time.Time
+	LastError *string
+	ID        uuid.UUID
+	Owner     *string
+}
+
+func (q *Queries) FailJobCancelled(ctx context.Context, arg FailJobCancelledParams) (Job, error) {
+	row := q.db.QueryRow(ctx, failJobCancelled,
+		arg.Now,
+		arg.LastError,
+		arg.ID,
+		arg.Owner,
+	)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Queue,
+		&i.Type,
+		&i.Payload,
+		&i.Status,
+		&i.Priority,
+		&i.RunAt,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.LeaseOwner,
+		&i.LeaseExpiresAt,
+		&i.IdempotencyKey,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+		&i.CancelRequested,
+		&i.CancelledAt,
 	)
 	return i, err
 }
@@ -281,7 +498,8 @@ WHERE id = $3
   AND status = 'running'
   AND lease_owner = $4
   AND lease_expires_at > $1::timestamptz
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at
+  AND cancel_requested = false
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
 `
 
 type FailJobDeadParams struct {
@@ -316,6 +534,8 @@ func (q *Queries) FailJobDead(ctx context.Context, arg FailJobDeadParams) (Job, 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.CancelRequested,
+		&i.CancelledAt,
 	)
 	return i, err
 }
@@ -333,7 +553,8 @@ WHERE id = $4
   AND status = 'running'
   AND lease_owner = $5
   AND lease_expires_at > $3::timestamptz
-RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at
+  AND cancel_requested = false
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
 `
 
 type FailJobPendingParams struct {
@@ -370,12 +591,14 @@ func (q *Queries) FailJobPending(ctx context.Context, arg FailJobPendingParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.CancelRequested,
+		&i.CancelledAt,
 	)
 	return i, err
 }
 
 const getJob = `-- name: GetJob :one
-SELECT id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at FROM jobs
+SELECT id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at FROM jobs
 WHERE id = $1
 `
 
@@ -399,12 +622,14 @@ func (q *Queries) GetJob(ctx context.Context, id uuid.UUID) (Job, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.CancelRequested,
+		&i.CancelledAt,
 	)
 	return i, err
 }
 
 const getJobByIdempotencyKey = `-- name: GetJobByIdempotencyKey :one
-SELECT id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at FROM jobs
+SELECT id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at FROM jobs
 WHERE queue = $1 AND idempotency_key = $2
 `
 
@@ -433,11 +658,112 @@ func (q *Queries) GetJobByIdempotencyKey(ctx context.Context, arg GetJobByIdempo
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.CancelRequested,
+		&i.CancelledAt,
 	)
 	return i, err
 }
 
-const markExpiredLeasesDead = `-- name: MarkExpiredLeasesDead :exec
+const getJobForUpdate = `-- name: GetJobForUpdate :one
+SELECT id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at FROM jobs
+WHERE id = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetJobForUpdate(ctx context.Context, id uuid.UUID) (Job, error) {
+	row := q.db.QueryRow(ctx, getJobForUpdate, id)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Queue,
+		&i.Type,
+		&i.Payload,
+		&i.Status,
+		&i.Priority,
+		&i.RunAt,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.LeaseOwner,
+		&i.LeaseExpiresAt,
+		&i.IdempotencyKey,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+		&i.CancelRequested,
+		&i.CancelledAt,
+	)
+	return i, err
+}
+
+const listJobsByStatus = `-- name: ListJobsByStatus :many
+SELECT id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at FROM jobs
+WHERE queue = $1
+  AND status = $2
+  AND (
+    $3::boolean = false
+    OR (updated_at, id) < ($4::timestamptz, $5::uuid)
+  )
+ORDER BY updated_at DESC, id DESC
+LIMIT $6
+`
+
+type ListJobsByStatusParams struct {
+	Queue           string
+	Status          string
+	HasCursor       bool
+	CursorUpdatedAt time.Time
+	CursorID        uuid.UUID
+	PageLimit       int32
+}
+
+func (q *Queries) ListJobsByStatus(ctx context.Context, arg ListJobsByStatusParams) ([]Job, error) {
+	rows, err := q.db.Query(ctx, listJobsByStatus,
+		arg.Queue,
+		arg.Status,
+		arg.HasCursor,
+		arg.CursorUpdatedAt,
+		arg.CursorID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Job{}
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.ID,
+			&i.Queue,
+			&i.Type,
+			&i.Payload,
+			&i.Status,
+			&i.Priority,
+			&i.RunAt,
+			&i.Attempts,
+			&i.MaxAttempts,
+			&i.LeaseOwner,
+			&i.LeaseExpiresAt,
+			&i.IdempotencyKey,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FinishedAt,
+			&i.CancelRequested,
+			&i.CancelledAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markExpiredLeasesDead = `-- name: MarkExpiredLeasesDead :many
 UPDATE jobs
 SET
     status = 'dead',
@@ -450,6 +776,7 @@ WHERE queue = $2
   AND status = 'running'
   AND lease_expires_at <= $1::timestamptz
   AND attempts >= max_attempts
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
 `
 
 type MarkExpiredLeasesDeadParams struct {
@@ -457,7 +784,299 @@ type MarkExpiredLeasesDeadParams struct {
 	Queue string
 }
 
-func (q *Queries) MarkExpiredLeasesDead(ctx context.Context, arg MarkExpiredLeasesDeadParams) error {
-	_, err := q.db.Exec(ctx, markExpiredLeasesDead, arg.Now, arg.Queue)
-	return err
+func (q *Queries) MarkExpiredLeasesDead(ctx context.Context, arg MarkExpiredLeasesDeadParams) ([]Job, error) {
+	rows, err := q.db.Query(ctx, markExpiredLeasesDead, arg.Now, arg.Queue)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Job{}
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.ID,
+			&i.Queue,
+			&i.Type,
+			&i.Payload,
+			&i.Status,
+			&i.Priority,
+			&i.RunAt,
+			&i.Attempts,
+			&i.MaxAttempts,
+			&i.LeaseOwner,
+			&i.LeaseExpiresAt,
+			&i.IdempotencyKey,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FinishedAt,
+			&i.CancelRequested,
+			&i.CancelledAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const purgeFinishedSelect = `-- name: PurgeFinishedSelect :many
+SELECT id FROM jobs
+WHERE status IN ('succeeded', 'dead', 'cancelled')
+  AND finished_at IS NOT NULL
+  AND finished_at < $1::timestamptz
+ORDER BY finished_at ASC
+FOR UPDATE SKIP LOCKED
+LIMIT $2
+`
+
+type PurgeFinishedSelectParams struct {
+	Before     time.Time
+	BatchLimit int32
+}
+
+func (q *Queries) PurgeFinishedSelect(ctx context.Context, arg PurgeFinishedSelectParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, purgeFinishedSelect, arg.Before, arg.BatchLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const reapExpiredDead = `-- name: ReapExpiredDead :one
+UPDATE jobs
+SET
+    status = 'dead',
+    last_error = 'lease expired',
+    finished_at = $1::timestamptz,
+    lease_owner = NULL,
+    lease_expires_at = NULL,
+    updated_at = $1::timestamptz
+WHERE id = $2
+  AND status = 'running'
+  AND lease_expires_at <= $1::timestamptz
+  AND attempts >= max_attempts
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+`
+
+type ReapExpiredDeadParams struct {
+	Now time.Time
+	ID  uuid.UUID
+}
+
+func (q *Queries) ReapExpiredDead(ctx context.Context, arg ReapExpiredDeadParams) (Job, error) {
+	row := q.db.QueryRow(ctx, reapExpiredDead, arg.Now, arg.ID)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Queue,
+		&i.Type,
+		&i.Payload,
+		&i.Status,
+		&i.Priority,
+		&i.RunAt,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.LeaseOwner,
+		&i.LeaseExpiresAt,
+		&i.IdempotencyKey,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+		&i.CancelRequested,
+		&i.CancelledAt,
+	)
+	return i, err
+}
+
+const reapExpiredRequeue = `-- name: ReapExpiredRequeue :one
+UPDATE jobs
+SET
+    status = 'pending',
+    run_at = $1::timestamptz,
+    lease_owner = NULL,
+    lease_expires_at = NULL,
+    updated_at = $1::timestamptz
+WHERE id = $2
+  AND status = 'running'
+  AND lease_expires_at <= $1::timestamptz
+  AND attempts < max_attempts
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+`
+
+type ReapExpiredRequeueParams struct {
+	Now time.Time
+	ID  uuid.UUID
+}
+
+func (q *Queries) ReapExpiredRequeue(ctx context.Context, arg ReapExpiredRequeueParams) (Job, error) {
+	row := q.db.QueryRow(ctx, reapExpiredRequeue, arg.Now, arg.ID)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Queue,
+		&i.Type,
+		&i.Payload,
+		&i.Status,
+		&i.Priority,
+		&i.RunAt,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.LeaseOwner,
+		&i.LeaseExpiresAt,
+		&i.IdempotencyKey,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+		&i.CancelRequested,
+		&i.CancelledAt,
+	)
+	return i, err
+}
+
+const reapExpiredSelect = `-- name: ReapExpiredSelect :many
+SELECT id FROM jobs
+WHERE status = 'running'
+  AND lease_expires_at <= $1::timestamptz
+ORDER BY id ASC
+FOR UPDATE SKIP LOCKED
+LIMIT $2
+`
+
+type ReapExpiredSelectParams struct {
+	Now        time.Time
+	BatchLimit int32
+}
+
+func (q *Queries) ReapExpiredSelect(ctx context.Context, arg ReapExpiredSelectParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, reapExpiredSelect, arg.Now, arg.BatchLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const releaseJob = `-- name: ReleaseJob :one
+UPDATE jobs
+SET
+    status = 'pending',
+    attempts = CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END,
+    run_at = $1::timestamptz,
+    lease_owner = NULL,
+    lease_expires_at = NULL,
+    updated_at = $1::timestamptz
+WHERE id = $2
+  AND status = 'running'
+  AND lease_owner = $3
+  AND lease_expires_at > $1::timestamptz
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+`
+
+type ReleaseJobParams struct {
+	Now   time.Time
+	ID    uuid.UUID
+	Owner *string
+}
+
+func (q *Queries) ReleaseJob(ctx context.Context, arg ReleaseJobParams) (Job, error) {
+	row := q.db.QueryRow(ctx, releaseJob, arg.Now, arg.ID, arg.Owner)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Queue,
+		&i.Type,
+		&i.Payload,
+		&i.Status,
+		&i.Priority,
+		&i.RunAt,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.LeaseOwner,
+		&i.LeaseExpiresAt,
+		&i.IdempotencyKey,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+		&i.CancelRequested,
+		&i.CancelledAt,
+	)
+	return i, err
+}
+
+const retryJob = `-- name: RetryJob :one
+UPDATE jobs
+SET
+    status = 'pending',
+    attempts = 0,
+    run_at = $1::timestamptz,
+    finished_at = NULL,
+    cancelled_at = NULL,
+    cancel_requested = false,
+    lease_owner = NULL,
+    lease_expires_at = NULL,
+    updated_at = $1::timestamptz
+WHERE id = $2
+  AND status IN ('dead', 'cancelled')
+RETURNING id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at
+`
+
+type RetryJobParams struct {
+	Now time.Time
+	ID  uuid.UUID
+}
+
+func (q *Queries) RetryJob(ctx context.Context, arg RetryJobParams) (Job, error) {
+	row := q.db.QueryRow(ctx, retryJob, arg.Now, arg.ID)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Queue,
+		&i.Type,
+		&i.Payload,
+		&i.Status,
+		&i.Priority,
+		&i.RunAt,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.LeaseOwner,
+		&i.LeaseExpiresAt,
+		&i.IdempotencyKey,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+		&i.CancelRequested,
+		&i.CancelledAt,
+	)
+	return i, err
 }

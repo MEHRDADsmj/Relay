@@ -11,20 +11,39 @@ import (
 )
 
 type Job struct {
-	ID             uuid.UUID
-	Queue          string
-	Type           string
-	Payload        []byte
-	Status         string
-	Priority       int16
-	RunAt          time.Time
-	Attempts       int32
-	MaxAttempts    int32
-	LeaseOwner     *string
-	LeaseExpiresAt *time.Time
-	IdempotencyKey *string
-	LastError      *string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	FinishedAt     *time.Time
+	ID              uuid.UUID
+	Queue           string
+	Type            string
+	Payload         []byte
+	Status          string
+	Priority        int16
+	RunAt           time.Time
+	Attempts        int32
+	MaxAttempts     int32
+	LeaseOwner      *string
+	LeaseExpiresAt  *time.Time
+	IdempotencyKey  *string
+	LastError       *string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	FinishedAt      *time.Time
+	CancelRequested bool
+	CancelledAt     *time.Time
+}
+
+type JobAttempt struct {
+	JobID      uuid.UUID
+	Number     int32
+	WorkerID   string
+	StartedAt  time.Time
+	FinishedAt *time.Time
+	Outcome    string
+	Error      *string
+}
+
+type Queue struct {
+	Name      string
+	Paused    bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
