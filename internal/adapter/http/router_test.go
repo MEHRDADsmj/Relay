@@ -566,6 +566,10 @@ func (failingPingRepo) ListByStatus(context.Context, string, domain.Status, doma
 	return domain.Page[domain.Job]{}, domain.ErrNotFound
 }
 
+func (failingPingRepo) ListJobsBySchedule(context.Context, domain.ScheduleID, int) ([]domain.Job, error) {
+	return nil, domain.ErrNotFound
+}
+
 func (failingPingRepo) Ping(context.Context) error {
 	return context.DeadlineExceeded
 }
@@ -617,6 +621,10 @@ func (errorCreateRepo) ListAttempts(context.Context, domain.JobID) ([]domain.Att
 
 func (errorCreateRepo) ListByStatus(context.Context, string, domain.Status, domain.PageRequest) (domain.Page[domain.Job], error) {
 	return domain.Page[domain.Job]{}, domain.ErrNotFound
+}
+
+func (errorCreateRepo) ListJobsBySchedule(context.Context, domain.ScheduleID, int) ([]domain.Job, error) {
+	return nil, domain.ErrNotFound
 }
 
 func (errorCreateRepo) Ping(context.Context) error { return nil }

@@ -125,6 +125,11 @@ func (k Keys) Leader(name string) string {
 	return fmt.Sprintf("%s:leader:%s", k.prefix, name)
 }
 
+// ScheduleJobs returns relay:schedule:{id}:jobs (zset of recent job ids, score=created_at_ms).
+func (k Keys) ScheduleJobs(scheduleID string) string {
+	return fmt.Sprintf("%s:schedule:%s:jobs", k.prefix, scheduleID)
+}
+
 // Stats returns relay:stats:{queue}:{minute_unix}.
 func (k Keys) Stats(queue string, minuteUnix int64) string {
 	return fmt.Sprintf("%s:stats:%s:%d", k.prefix, queue, minuteUnix)

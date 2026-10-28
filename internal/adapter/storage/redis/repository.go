@@ -171,6 +171,9 @@ func (r *Repository) Create(ctx context.Context, job domain.Job) (domain.Job, bo
 	}
 	created := arr[0] == "1"
 	if created {
+		if sid, ok := domain.ScheduleIDFromFireKey(job.IdempotencyKey); ok {
+			_ = r.indexScheduleJob(ctx, sid, job.ID, job.CreatedAt)
+		}
 		return job, true, nil
 	}
 	existingID, err := uuid.Parse(arr[1])

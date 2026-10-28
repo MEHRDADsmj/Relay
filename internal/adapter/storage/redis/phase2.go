@@ -2,11 +2,13 @@ package redis
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"time"
 
+	"github.com/google/uuid"
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/MEHRDADsmj/relay/internal/app"
@@ -144,6 +146,51 @@ func (r *Repository) ListByStatus(ctx context.Context, queue string, status doma
 		matched = matched[:limit]
 	}
 	return domain.Page[domain.Job]{Items: matched, NextCursor: nextCursor}, nil
+}
+
+// ListJobsBySchedule implements app.JobRepository.
+func (r *Repository) ListJobsBySchedule(ctx context.Context, scheduleID domain.ScheduleID, limit int) ([]domain.Job, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	ids, err := r.client.ZRangeArgs(ctx, goredis.ZRangeArgs{
+		Key:   r.keys.ScheduleJobs(scheduleID.String()),
+		Start: 0,
+		Stop:  int64(limit - 1),
+		Rev:   true,
+	}).Result()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.Job, 0, len(ids))
+	for _, idStr := range ids {
+		id, err := uuid.Parse(idStr)
+		if err != nil {
+			continue
+		}
+		job, err := r.Get(ctx, id)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		out = append(out, job)
+	}
+	return out, nil
+}
+
+func (r *Repository) indexScheduleJob(ctx context.Context, scheduleID domain.ScheduleID, jobID domain.JobID, createdAt time.Time) error {
+	key := r.keys.ScheduleJobs(scheduleID.String())
+	pipe := r.client.TxPipeline()
+	pipe.ZAdd(ctx, key, goredis.Z{Score: float64(toUnixMs(createdAt)), Member: jobID.String()})
+	// Keep newest 100: remove lowest ranks when size > 100.
+	pipe.ZRemRangeByRank(ctx, key, 0, -101)
+	_, err := pipe.Exec(ctx)
+	return err
 }
 
 func (r *Repository) listPendingJobs(ctx context.Context, queue string) ([]domain.Job, error) {

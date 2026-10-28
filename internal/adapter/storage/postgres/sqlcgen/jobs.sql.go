@@ -712,6 +712,58 @@ func (q *Queries) GetJobForUpdate(ctx context.Context, id uuid.UUID) (Job, error
 	return i, err
 }
 
+const listJobsBySchedule = `-- name: ListJobsBySchedule :many
+SELECT id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context FROM jobs
+WHERE idempotency_key LIKE $1::text || '%'
+ORDER BY created_at DESC, id DESC
+LIMIT $2
+`
+
+type ListJobsByScheduleParams struct {
+	Prefix    string
+	PageLimit int32
+}
+
+func (q *Queries) ListJobsBySchedule(ctx context.Context, arg ListJobsByScheduleParams) ([]Job, error) {
+	rows, err := q.db.Query(ctx, listJobsBySchedule, arg.Prefix, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Job{}
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.ID,
+			&i.Queue,
+			&i.Type,
+			&i.Payload,
+			&i.Status,
+			&i.Priority,
+			&i.RunAt,
+			&i.Attempts,
+			&i.MaxAttempts,
+			&i.LeaseOwner,
+			&i.LeaseExpiresAt,
+			&i.IdempotencyKey,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FinishedAt,
+			&i.CancelRequested,
+			&i.CancelledAt,
+			&i.TraceContext,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listJobsByStatus = `-- name: ListJobsByStatus :many
 SELECT id, queue, type, payload, status, priority, run_at, attempts, max_attempts, lease_owner, lease_expires_at, idempotency_key, last_error, created_at, updated_at, finished_at, cancel_requested, cancelled_at, trace_context FROM jobs
 WHERE queue = $1

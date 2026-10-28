@@ -26,15 +26,16 @@ type SchedulerConfig struct {
 
 // Scheduler fires due schedules while holding cluster leadership.
 type Scheduler struct {
-	schedules ScheduleRepository
-	jobs      *JobService
-	elector   LeaderElector
-	parser    CronParser
-	clock     Clock
-	log       *slog.Logger
-	cfg       SchedulerConfig
-	metrics   Metrics
-	tracer    trace.Tracer
+	schedules  ScheduleRepository
+	jobs       *JobService
+	elector    LeaderElector
+	parser     CronParser
+	clock      Clock
+	log        *slog.Logger
+	cfg        SchedulerConfig
+	metrics    Metrics
+	tracer     trace.Tracer
+	leadership *Leadership
 }
 
 // NewScheduler constructs a Scheduler. log may be nil.
@@ -85,6 +86,12 @@ func (s *Scheduler) WithTracerProvider(tp trace.TracerProvider) *Scheduler {
 	return s
 }
 
+// WithLeadership records scheduler leadership for the dashboard overview.
+func (s *Scheduler) WithLeadership(l *Leadership) *Scheduler {
+	s.leadership = l
+	return s
+}
+
 // SystemPrincipal is used by background components (scheduler) when calling scoped services.
 var SystemPrincipal = domain.Principal{
 	KeyID:  "system",
@@ -113,8 +120,10 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		}
 		s.log.InfoContext(ctx, "scheduler leadership acquired")
 		s.metrics.LeaderChanged(schedulerLockName, true)
+		s.leadership.SetHolding(true)
 		err = s.lead(leaderCtx)
 		resign()
+		s.leadership.SetHolding(false)
 		s.metrics.LeaderChanged(schedulerLockName, false)
 		s.log.InfoContext(ctx, "scheduler leadership lost")
 		if ctx.Err() != nil {

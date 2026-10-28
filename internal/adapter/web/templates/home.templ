@@ -1,14 +1,93 @@
 package templates
 
-templ HomePage(csrf string, keyName string) {
-	@Layout("Overview", csrf, true, homeBody(keyName))
+templ HomePage(data OverviewData) {
+	@Layout("Overview", data.CSRF, true, overviewBody(data))
 }
 
-templ homeBody(keyName string) {
-	<div>
-		<h1 class="text-2xl font-semibold tracking-tight">Overview</h1>
-		<p class="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-			Signed in as <strong>{ keyName }</strong>. Queue dashboards arrive in the next task.
-		</p>
+templ overviewBody(data OverviewData) {
+	<div
+		hx-ext="sse"
+		sse-connect="/ui/events"
+		sse-swap="overview"
+		hx-target="#overview-live"
+	>
+		<div class="flex flex-wrap items-end justify-between gap-4">
+			<div>
+				<h1 class="text-2xl font-semibold tracking-tight">Overview</h1>
+				<p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+					Signed in as <strong>{ data.KeyName }</strong>
+				</p>
+			</div>
+			<p class="text-sm text-zinc-600 dark:text-zinc-400" aria-live="polite">
+				Instance <code class="rounded bg-zinc-200 px-1 dark:bg-zinc-800">{ data.InstanceID }</code>
+				if data.IsLeader {
+					<span class="ml-2 rounded bg-emerald-100 px-2 py-0.5 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">scheduler leader</span>
+				} else {
+					<span class="ml-2 text-zinc-500">follower</span>
+				}
+			</p>
+		</div>
+		<div id="overview-live" class="mt-6">
+			@OverviewLive(data)
+		</div>
+	</div>
+}
+
+templ OverviewLive(data OverviewData) {
+	<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-live="polite">
+		@statCard("Pending", FormatInt64(data.Totals.Pending))
+		@statCard("Scheduled", FormatInt64(data.Totals.Scheduled))
+		@statCard("Running", FormatInt64(data.Totals.Running))
+		@statCard("Dead", FormatInt64(data.Totals.Dead))
+	</div>
+	<div class="mt-8 overflow-x-auto">
+		<table class="w-full min-w-[40rem] border-collapse text-left text-sm">
+			<caption class="sr-only">Queues</caption>
+			<thead>
+				<tr class="border-b border-zinc-200 dark:border-zinc-800">
+					<th scope="col" class="py-2 pr-3 font-medium">Queue</th>
+					<th scope="col" class="py-2 pr-3 font-medium">Pending</th>
+					<th scope="col" class="py-2 pr-3 font-medium">Scheduled</th>
+					<th scope="col" class="py-2 pr-3 font-medium">Running</th>
+					<th scope="col" class="py-2 pr-3 font-medium">Dead</th>
+					<th scope="col" class="py-2 pr-3 font-medium">Oldest</th>
+					<th scope="col" class="py-2 font-medium">Throughput (15m)</th>
+				</tr>
+			</thead>
+			<tbody>
+				if len(data.Queues) == 0 {
+					<tr>
+						<td colspan="7" class="py-8 text-center text-zinc-600 dark:text-zinc-400">
+							No queues yet. Enqueue a job to create one.
+						</td>
+					</tr>
+				}
+				for _, row := range data.Queues {
+					<tr class="border-b border-zinc-100 dark:border-zinc-900">
+						<td class="py-2 pr-3">
+							<a href={ SafePath("/ui/queues/" + row.Stats.Queue) } class="font-medium no-underline">{ row.Stats.Queue }</a>
+							if row.Stats.Paused {
+								<span class="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200">paused</span>
+							}
+						</td>
+						<td class="py-2 pr-3 tabular-nums">{ FormatInt64(row.Stats.Pending) }</td>
+						<td class="py-2 pr-3 tabular-nums">{ FormatInt64(row.Stats.Scheduled) }</td>
+						<td class="py-2 pr-3 tabular-nums">{ FormatInt64(row.Stats.Running) }</td>
+						<td class="py-2 pr-3 tabular-nums">{ FormatInt64(row.Stats.Dead) }</td>
+						<td class="py-2 pr-3 tabular-nums">{ FormatAge(row.Stats.OldestPendingAge) }</td>
+						<td class="py-2 text-sky-700 dark:text-sky-400">
+							@RawHTML(row.Sparkline)
+						</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	</div>
+}
+
+templ statCard(label, value string) {
+	<div class="rounded border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
+		<p class="text-xs uppercase tracking-wide text-zinc-500">{ label }</p>
+		<p class="mt-1 text-2xl font-semibold tabular-nums">{ value }</p>
 	</div>
 }

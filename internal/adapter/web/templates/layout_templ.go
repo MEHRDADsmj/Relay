@@ -82,14 +82,14 @@ func Layout(title string, csrf string, loggedIn bool, body templ.Component) temp
 			return templ_7745c5c3_Err
 		}
 		if loggedIn {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<nav aria-label=\"Primary\" class=\"flex items-center gap-4 text-sm\"><a href=\"/ui/\" class=\"no-underline text-zinc-700 dark:text-zinc-300\">Overview</a><form method=\"post\" action=\"/ui/logout\" class=\"inline\"><input type=\"hidden\" name=\"csrf\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<nav aria-label=\"Primary\" class=\"flex flex-wrap items-center gap-4 text-sm\"><a href=\"/ui/\" class=\"no-underline text-zinc-700 dark:text-zinc-300\">Overview</a> <a href=\"/ui/schedules\" class=\"no-underline text-zinc-700 dark:text-zinc-300\">Schedules</a><form method=\"post\" action=\"/ui/logout\" class=\"inline\"><input type=\"hidden\" name=\"csrf\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var5 string
 			templ_7745c5c3_Var5, templ_7745c5c3_Err = templruntime.NewAttributeExpression(csrf).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/adapter/web/templates/layout.templ`, Line: 28, Col: 53}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/adapter/web/templates/layout.templ`, Line: 29, Col: 53}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 			if templ_7745c5c3_Err != nil {

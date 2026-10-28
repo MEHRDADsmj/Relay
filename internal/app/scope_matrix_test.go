@@ -42,7 +42,7 @@ func TestScopeMatrix(t *testing.T) {
 			_, _, err := js.Enqueue(ctx, app.EnqueueCommand{Queue: "default", Type: "t"})
 			return err
 		}, false},
-		{"JobService.Get", domain.ScopeProducer, func(ctx context.Context) error {
+		{"JobService.Get", domain.ScopeDashboardRead, func(ctx context.Context) error {
 			_, err := js.Get(ctx, jobID)
 			return err
 		}, false},
@@ -78,12 +78,16 @@ func TestScopeMatrix(t *testing.T) {
 			_, err := js.Retry(ctx, jobID)
 			return err
 		}, false},
-		{"JobService.ListAttempts", domain.ScopeProducer, func(ctx context.Context) error {
+		{"JobService.ListAttempts", domain.ScopeDashboardRead, func(ctx context.Context) error {
 			_, err := js.ListAttempts(ctx, jobID)
 			return err
 		}, false},
-		{"JobService.ListByStatus", domain.ScopeProducer, func(ctx context.Context) error {
+		{"JobService.ListByStatus", domain.ScopeDashboardRead, func(ctx context.Context) error {
 			_, err := js.ListByStatus(ctx, app.ListByStatusCommand{Queue: "default", Status: domain.StatusPending})
+			return err
+		}, false},
+		{"JobService.ListJobsBySchedule", domain.ScopeDashboardRead, func(ctx context.Context) error {
+			_, err := js.ListJobsBySchedule(ctx, jobID, 10)
 			return err
 		}, false},
 		{"JobService.Ready", "", func(ctx context.Context) error {
@@ -117,15 +121,15 @@ func TestScopeMatrix(t *testing.T) {
 			_, err := ss.Create(ctx, app.CreateScheduleCommand{Name: "scope-create-" + uuidShort(), Cron: "@hourly", Queue: "default", JobType: "t"})
 			return err
 		}, false},
-		{"ScheduleService.Get", domain.ScopeAdmin, func(ctx context.Context) error {
+		{"ScheduleService.Get", domain.ScopeDashboardRead, func(ctx context.Context) error {
 			_, err := ss.Get(ctx, jobID)
 			return err
 		}, false},
-		{"ScheduleService.GetByName", domain.ScopeAdmin, func(ctx context.Context) error {
+		{"ScheduleService.GetByName", domain.ScopeDashboardRead, func(ctx context.Context) error {
 			_, err := ss.GetByName(ctx, "missing")
 			return err
 		}, false},
-		{"ScheduleService.List", domain.ScopeAdmin, func(ctx context.Context) error {
+		{"ScheduleService.List", domain.ScopeDashboardRead, func(ctx context.Context) error {
 			_, err := ss.List(ctx, domain.PageRequest{})
 			return err
 		}, false},
@@ -166,7 +170,7 @@ func TestScopeMatrix(t *testing.T) {
 		domain.ScopeProducer:      domain.ScopeWorker,
 		domain.ScopeWorker:        domain.ScopeProducer,
 		domain.ScopeAdmin:         domain.ScopeProducer,
-		domain.ScopeDashboardRead: domain.ScopeProducer,
+		domain.ScopeDashboardRead: domain.ScopeWorker,
 	}
 
 	for _, c := range checks {

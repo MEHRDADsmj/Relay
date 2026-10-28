@@ -1,0 +1,173 @@
+package templates
+
+import (
+	"fmt"
+
+	"github.com/MEHRDADsmj/relay/internal/domain"
+)
+
+templ QueuePage(data QueueDetailData) {
+	@Layout("Queue "+data.Queue, data.CSRF, true, queueBody(data))
+}
+
+templ queueBody(data QueueDetailData) {
+	<div>
+		<nav class="text-sm text-zinc-600 dark:text-zinc-400" aria-label="Breadcrumb">
+			<a href="/ui/" class="no-underline">Overview</a>
+			<span aria-hidden="true"> / </span>
+			<span class="text-zinc-900 dark:text-zinc-100">{ data.Queue }</span>
+		</nav>
+		<div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+			<div class="flex items-center gap-3">
+				<h1 class="text-2xl font-semibold tracking-tight">{ data.Queue }</h1>
+				if data.Stats.Paused {
+					<span class="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200">paused</span>
+				}
+			</div>
+			if data.CanAdmin {
+				<div class="flex flex-wrap gap-2">
+					if data.Stats.Paused {
+						<form method="post" action={ SafePath("/ui/queues/" + data.Queue + "/resume") }>
+							<input type="hidden" name="csrf" value={ data.CSRF }/>
+							<button type="submit" class="cursor-pointer rounded border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700">Resume</button>
+						</form>
+					} else {
+						<form method="post" action={ SafePath("/ui/queues/" + data.Queue + "/pause") }>
+							<input type="hidden" name="csrf" value={ data.CSRF }/>
+							<button type="submit" class="cursor-pointer rounded border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700">Pause</button>
+						</form>
+					}
+					<form
+						method="post"
+						action={ SafePath("/ui/queues/" + data.Queue + "/retry-dead") }
+						hx-post={ "/ui/queues/" + data.Queue + "/retry-dead" }
+						hx-target="#queue-jobs"
+						hx-swap="outerHTML"
+						hx-confirm="Retry all dead jobs in this queue?"
+					>
+						<input type="hidden" name="csrf" value={ data.CSRF }/>
+						<button type="submit" class="cursor-pointer rounded border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700">Retry all dead</button>
+					</form>
+				</div>
+			}
+		</div>
+		<div id="queue-controls" class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-live="polite">
+			@QueueStatsCards(data.Stats)
+		</div>
+		<div class="mt-8">
+			<div class="flex flex-wrap items-center justify-between gap-2">
+				<h2 class="text-lg font-medium">Throughput</h2>
+				<div class="flex gap-1 text-sm" role="tablist" aria-label="Throughput window">
+					@windowTab(data.Queue, "15m", data.Window)
+					@windowTab(data.Queue, "1h", data.Window)
+					@windowTab(data.Queue, "24h", data.Window)
+				</div>
+			</div>
+			<div class="mt-3 overflow-x-auto text-sky-700 dark:text-sky-400">
+				@RawHTML(data.ChartSVG)
+			</div>
+		</div>
+		<div class="mt-8">
+			<div class="flex flex-wrap gap-2 text-sm" role="tablist" aria-label="Job status">
+				@statusTab(data.Queue, domain.StatusPending, data.Status)
+				@statusTab(data.Queue, domain.StatusRunning, data.Status)
+				@statusTab(data.Queue, domain.StatusSucceeded, data.Status)
+				@statusTab(data.Queue, domain.StatusDead, data.Status)
+				@statusTab(data.Queue, domain.StatusCancelled, data.Status)
+			</div>
+			@QueueJobsFragment(data)
+		</div>
+	</div>
+}
+
+templ QueueStatsCards(stats domain.QueueStats) {
+	@statCard("Pending", FormatInt64(stats.Pending))
+	@statCard("Scheduled", FormatInt64(stats.Scheduled))
+	@statCard("Running", FormatInt64(stats.Running))
+	@statCard("Dead", FormatInt64(stats.Dead))
+}
+
+templ QueueJobsFragment(data QueueDetailData) {
+	<div id="queue-jobs" class="mt-4 overflow-x-auto">
+		if len(data.Jobs) == 0 {
+			<p class="py-8 text-center text-sm text-zinc-600 dark:text-zinc-400">
+				if data.Status == domain.StatusDead {
+					No dead jobs — nice.
+				} else {
+					No { string(data.Status) } jobs in this queue.
+				}
+			</p>
+		} else {
+			<table class="w-full min-w-[36rem] border-collapse text-left text-sm">
+				<thead>
+					<tr class="border-b border-zinc-200 dark:border-zinc-800">
+						<th scope="col" class="py-2 pr-3 font-medium">ID</th>
+						<th scope="col" class="py-2 pr-3 font-medium">Type</th>
+						<th scope="col" class="py-2 pr-3 font-medium">Attempts</th>
+						<th scope="col" class="py-2 font-medium">Updated</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, j := range data.Jobs {
+						<tr class="border-b border-zinc-100 dark:border-zinc-900">
+							<td class="py-2 pr-3 font-mono text-xs">
+								<a href={ SafePath("/ui/jobs/" + j.ID.String()) } class="no-underline">{ shortID(j.ID.String()) }</a>
+							</td>
+							<td class="py-2 pr-3">{ j.Type }</td>
+							<td class="py-2 pr-3 tabular-nums">{ fmtAttempts(j.Attempts, j.MaxAttempts) }</td>
+							<td class="py-2 tabular-nums">{ FormatTime(j.UpdatedAt) }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+			if data.NextCursor != "" {
+				<p class="mt-4">
+					<a
+						href={ SafePath(fmt.Sprintf("/ui/queues/%s?status=%s&cursor=%s&window=%s", data.Queue, data.Status, data.NextCursor, data.Window)) }
+						hx-get={ fmt.Sprintf("/ui/queues/%s?status=%s&cursor=%s&window=%s&fragment=jobs", data.Queue, data.Status, data.NextCursor, data.Window) }
+						hx-target="#queue-jobs"
+						hx-swap="outerHTML"
+						hx-push-url={ fmt.Sprintf("/ui/queues/%s?status=%s&cursor=%s&window=%s", data.Queue, data.Status, data.NextCursor, data.Window) }
+						class="text-sm no-underline"
+					>Next page</a>
+				</p>
+			}
+		}
+	</div>
+}
+
+templ windowTab(queue, window, active string) {
+	<a
+		href={ SafePath("/ui/queues/" + queue + "?window=" + window) }
+		class={ "rounded px-2 py-1 no-underline", templ.KV("bg-zinc-200 dark:bg-zinc-800", window == active), templ.KV("text-zinc-600 dark:text-zinc-400", window != active) }
+		role="tab"
+		aria-selected={ boolStr(window == active) }
+	>{ window }</a>
+}
+
+templ statusTab(queue string, status, active domain.Status) {
+	<a
+		href={ SafePath(fmt.Sprintf("/ui/queues/%s?status=%s", queue, status)) }
+		class={ "rounded px-2 py-1 no-underline capitalize", templ.KV("bg-zinc-200 dark:bg-zinc-800", status == active), templ.KV("text-zinc-600 dark:text-zinc-400", status != active) }
+		role="tab"
+		aria-selected={ boolStr(status == active) }
+	>{ string(status) }</a>
+}
+
+func shortID(id string) string {
+	if len(id) <= 8 {
+		return id
+	}
+	return id[:8]
+}
+
+func fmtAttempts(a, max int) string {
+	return fmt.Sprintf("%d / %d", a, max)
+}
+
+func boolStr(v bool) string {
+	if v {
+		return "true"
+	}
+	return "false"
+}

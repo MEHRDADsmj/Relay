@@ -22,8 +22,9 @@ templ Layout(title string, csrf string, loggedIn bool, body templ.Component) {
 				<div class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
 					<a href="/ui/" class="text-lg font-semibold tracking-tight text-zinc-900 no-underline dark:text-zinc-50">Relay</a>
 					if loggedIn {
-						<nav aria-label="Primary" class="flex items-center gap-4 text-sm">
+						<nav aria-label="Primary" class="flex flex-wrap items-center gap-4 text-sm">
 							<a href="/ui/" class="no-underline text-zinc-700 dark:text-zinc-300">Overview</a>
+							<a href="/ui/schedules" class="no-underline text-zinc-700 dark:text-zinc-300">Schedules</a>
 							<form method="post" action="/ui/logout" class="inline">
 								<input type="hidden" name="csrf" value={ csrf }/>
 								<button type="submit" class="cursor-pointer rounded border border-zinc-300 px-2 py-1 text-zinc-700 dark:border-zinc-700 dark:text-zinc-300">Log out</button>

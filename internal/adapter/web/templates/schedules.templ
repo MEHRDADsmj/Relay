@@ -1,0 +1,159 @@
+package templates
+
+templ SchedulesPage(data SchedulesData) {
+	@Layout("Schedules", data.CSRF, true, schedulesBody(data))
+}
+
+templ schedulesBody(data SchedulesData) {
+	<div>
+		<h1 class="text-2xl font-semibold tracking-tight">Schedules</h1>
+		<p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">Cron definitions that enqueue jobs on a schedule.</p>
+		<div class="mt-6 overflow-x-auto">
+			if len(data.Schedules) == 0 {
+				<p class="py-8 text-center text-sm text-zinc-600 dark:text-zinc-400">
+					No schedules yet. Create one via the API or relayctl.
+				</p>
+			} else {
+				<table class="w-full min-w-[48rem] border-collapse text-left text-sm">
+					<thead>
+						<tr class="border-b border-zinc-200 dark:border-zinc-800">
+							<th scope="col" class="py-2 pr-3 font-medium">Name</th>
+							<th scope="col" class="py-2 pr-3 font-medium">Cron</th>
+							<th scope="col" class="py-2 pr-3 font-medium">Timezone</th>
+							<th scope="col" class="py-2 pr-3 font-medium">Next</th>
+							<th scope="col" class="py-2 pr-3 font-medium">Last</th>
+							<th scope="col" class="py-2 font-medium">Actions</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, row := range data.Schedules {
+							<tr class="border-b border-zinc-100 dark:border-zinc-900">
+								<td class="py-2 pr-3">
+									<a href={ SafePath("/ui/schedules/" + row.Schedule.ID.String()) } class="font-medium no-underline">{ row.Schedule.Name }</a>
+									if !row.Schedule.Enabled {
+										<span class="ml-2 rounded bg-zinc-200 px-1.5 py-0.5 text-xs dark:bg-zinc-800">disabled</span>
+									}
+								</td>
+								<td class="py-2 pr-3">
+									<code class="text-xs">{ row.Schedule.Cron }</code>
+									<span class="ml-1 text-zinc-500">{ row.CronDesc }</span>
+								</td>
+								<td class="py-2 pr-3">{ row.Schedule.Timezone }</td>
+								<td class="py-2 pr-3 tabular-nums text-xs">{ FormatTime(row.Schedule.NextRunAt) }</td>
+								<td class="py-2 pr-3 tabular-nums text-xs">{ FormatTimePtr(row.Schedule.LastRunAt) }</td>
+								<td class="py-2">
+									if data.CanAdmin {
+										<div class="flex flex-wrap gap-2">
+											if row.Schedule.Enabled {
+												<form method="post" action={ SafePath("/ui/schedules/" + row.Schedule.ID.String() + "/disable") } class="inline">
+													<input type="hidden" name="csrf" value={ data.CSRF }/>
+													<button type="submit" class="cursor-pointer text-xs underline">Disable</button>
+												</form>
+											} else {
+												<form method="post" action={ SafePath("/ui/schedules/" + row.Schedule.ID.String() + "/enable") } class="inline">
+													<input type="hidden" name="csrf" value={ data.CSRF }/>
+													<button type="submit" class="cursor-pointer text-xs underline">Enable</button>
+												</form>
+											}
+											<form method="post" action={ SafePath("/ui/schedules/" + row.Schedule.ID.String() + "/trigger") } class="inline">
+												<input type="hidden" name="csrf" value={ data.CSRF }/>
+												<button type="submit" class="cursor-pointer text-xs underline">Trigger now</button>
+											</form>
+										</div>
+									} else {
+										<span class="text-zinc-400">—</span>
+									}
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</div>
+	</div>
+}
+
+templ ScheduleDetailPage(data ScheduleDetailData) {
+	@Layout("Schedule "+data.Schedule.Name, data.CSRF, true, scheduleDetailBody(data))
+}
+
+templ scheduleDetailBody(data ScheduleDetailData) {
+	<div>
+		<nav class="text-sm text-zinc-600 dark:text-zinc-400" aria-label="Breadcrumb">
+			<a href="/ui/schedules" class="no-underline">Schedules</a>
+			<span aria-hidden="true"> / </span>
+			<span class="text-zinc-900 dark:text-zinc-100">{ data.Schedule.Name }</span>
+		</nav>
+		<div class="mt-4 flex flex-wrap items-start justify-between gap-3">
+			<div>
+				<h1 class="text-2xl font-semibold tracking-tight">{ data.Schedule.Name }</h1>
+				<p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+					<code>{ data.Schedule.Cron }</code> · { data.CronDesc } · { data.Schedule.Timezone }
+					if !data.Schedule.Enabled {
+						· <span class="text-amber-700 dark:text-amber-300">disabled</span>
+					}
+				</p>
+			</div>
+			if data.CanAdmin {
+				<div class="flex flex-wrap gap-2">
+					if data.Schedule.Enabled {
+						<form method="post" action={ SafePath("/ui/schedules/" + data.Schedule.ID.String() + "/disable") }>
+							<input type="hidden" name="csrf" value={ data.CSRF }/>
+							<button type="submit" class="cursor-pointer rounded border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700">Disable</button>
+						</form>
+					} else {
+						<form method="post" action={ SafePath("/ui/schedules/" + data.Schedule.ID.String() + "/enable") }>
+							<input type="hidden" name="csrf" value={ data.CSRF }/>
+							<button type="submit" class="cursor-pointer rounded border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700">Enable</button>
+						</form>
+					}
+					<form method="post" action={ SafePath("/ui/schedules/" + data.Schedule.ID.String() + "/trigger") }>
+						<input type="hidden" name="csrf" value={ data.CSRF }/>
+						<button type="submit" class="cursor-pointer rounded border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700">Trigger now</button>
+					</form>
+				</div>
+			}
+		</div>
+		<dl class="mt-6 grid gap-3 sm:grid-cols-2 text-sm">
+			@jobField("Queue", data.Schedule.Queue)
+			@jobField("Job type", data.Schedule.JobType)
+			@jobField("Next run", FormatTime(data.Schedule.NextRunAt))
+			@jobField("Last run", FormatTimePtr(data.Schedule.LastRunAt))
+			if data.Schedule.LastJobID != nil {
+				<div>
+					<dt class="text-zinc-500">Last job</dt>
+					<dd class="mt-0.5">
+						<a href={ SafePath("/ui/jobs/" + data.Schedule.LastJobID.String()) } class="font-mono text-xs no-underline">{ data.Schedule.LastJobID.String() }</a>
+					</dd>
+				</div>
+			}
+		</dl>
+		<section class="mt-8">
+			<h2 class="text-lg font-medium">Recent jobs</h2>
+			if len(data.Jobs) == 0 {
+				<p class="mt-2 text-sm text-zinc-600 dark:text-zinc-400">No jobs fired yet for this schedule.</p>
+			} else {
+				<table class="mt-3 w-full min-w-[32rem] border-collapse text-left text-sm">
+					<thead>
+						<tr class="border-b border-zinc-200 dark:border-zinc-800">
+							<th scope="col" class="py-2 pr-3 font-medium">ID</th>
+							<th scope="col" class="py-2 pr-3 font-medium">Status</th>
+							<th scope="col" class="py-2 font-medium">Created</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, j := range data.Jobs {
+							<tr class="border-b border-zinc-100 dark:border-zinc-900">
+								<td class="py-2 pr-3 font-mono text-xs">
+									<a href={ SafePath("/ui/jobs/" + j.ID.String()) } class="no-underline">{ shortID(j.ID.String()) }</a>
+								</td>
+								<td class="py-2 pr-3 capitalize">{ string(j.Status) }</td>
+								<td class="py-2 tabular-nums text-xs">{ FormatTime(j.CreatedAt) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	</div>
+}

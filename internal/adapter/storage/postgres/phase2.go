@@ -189,6 +189,28 @@ func (r *Repository) ListByStatus(ctx context.Context, queue string, status doma
 	return domain.Page[domain.Job]{Items: items, NextCursor: nextCursor}, nil
 }
 
+// ListJobsBySchedule implements app.JobRepository.
+func (r *Repository) ListJobsBySchedule(ctx context.Context, scheduleID domain.ScheduleID, limit int) ([]domain.Job, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	rows, err := r.q.ListJobsBySchedule(ctx, sqlcgen.ListJobsByScheduleParams{
+		Prefix:    domain.FireIdempotencyPrefix(scheduleID),
+		PageLimit: clampInt32(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.Job, len(rows))
+	for i := range rows {
+		out[i] = toDomain(rows[i])
+	}
+	return out, nil
+}
+
 // ListQueues implements app.QueueRepository.
 func (r *Repository) ListQueues(ctx context.Context) ([]domain.Queue, error) {
 	rows, err := r.q.ListQueues(ctx)

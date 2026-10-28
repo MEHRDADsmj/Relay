@@ -99,7 +99,7 @@ func (s *JobService) Enqueue(ctx context.Context, cmd EnqueueCommand) (job domai
 
 // Get returns a job by ID.
 func (s *JobService) Get(ctx context.Context, id domain.JobID) (domain.Job, error) {
-	if err := RequireScope(ctx, domain.ScopeProducer); err != nil {
+	if err := RequireAnyScope(ctx, domain.ScopeProducer, domain.ScopeDashboardRead); err != nil {
 		return domain.Job{}, err
 	}
 	job, err := s.repo.Get(ctx, id)
@@ -370,7 +370,7 @@ func (s *JobService) Retry(ctx context.Context, id domain.JobID) (domain.Job, er
 
 // ListAttempts returns attempt history for a job.
 func (s *JobService) ListAttempts(ctx context.Context, id domain.JobID) ([]domain.Attempt, error) {
-	if err := RequireScope(ctx, domain.ScopeProducer); err != nil {
+	if err := RequireAnyScope(ctx, domain.ScopeProducer, domain.ScopeDashboardRead); err != nil {
 		return nil, err
 	}
 	return s.repo.ListAttempts(ctx, id)
@@ -378,7 +378,7 @@ func (s *JobService) ListAttempts(ctx context.Context, id domain.JobID) ([]domai
 
 // ListByStatus returns a page of jobs filtered by queue and status.
 func (s *JobService) ListByStatus(ctx context.Context, cmd ListByStatusCommand) (domain.Page[domain.Job], error) {
-	if err := RequireScope(ctx, domain.ScopeProducer); err != nil {
+	if err := RequireAnyScope(ctx, domain.ScopeProducer, domain.ScopeDashboardRead); err != nil {
 		return domain.Page[domain.Job]{}, err
 	}
 	if err := domain.ValidateQueue(cmd.Queue); err != nil {
@@ -395,6 +395,20 @@ func (s *JobService) ListByStatus(ctx context.Context, cmd ListByStatusCommand) 
 		}
 	}
 	return s.repo.ListByStatus(ctx, cmd.Queue, cmd.Status, cmd.Page)
+}
+
+// ListJobsBySchedule returns recent jobs fired by a schedule (newest first).
+func (s *JobService) ListJobsBySchedule(ctx context.Context, scheduleID domain.ScheduleID, limit int) ([]domain.Job, error) {
+	if err := RequireAnyScope(ctx, domain.ScopeProducer, domain.ScopeDashboardRead); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	return s.repo.ListJobsBySchedule(ctx, scheduleID, limit)
 }
 
 // Ready checks repository connectivity.

@@ -81,7 +81,7 @@ func (s *ScheduleService) Create(ctx context.Context, cmd CreateScheduleCommand)
 
 // Get returns a schedule by ID.
 func (s *ScheduleService) Get(ctx context.Context, id domain.ScheduleID) (domain.Schedule, error) {
-	if err := RequireScope(ctx, domain.ScopeAdmin); err != nil {
+	if err := RequireAnyScope(ctx, domain.ScopeAdmin, domain.ScopeDashboardRead); err != nil {
 		return domain.Schedule{}, err
 	}
 	return s.repo.GetSchedule(ctx, id)
@@ -89,7 +89,7 @@ func (s *ScheduleService) Get(ctx context.Context, id domain.ScheduleID) (domain
 
 // GetByName returns a schedule by unique name.
 func (s *ScheduleService) GetByName(ctx context.Context, name string) (domain.Schedule, error) {
-	if err := RequireScope(ctx, domain.ScopeAdmin); err != nil {
+	if err := RequireAnyScope(ctx, domain.ScopeAdmin, domain.ScopeDashboardRead); err != nil {
 		return domain.Schedule{}, err
 	}
 	return s.repo.GetScheduleByName(ctx, name)
@@ -97,7 +97,7 @@ func (s *ScheduleService) GetByName(ctx context.Context, name string) (domain.Sc
 
 // List returns schedules ordered by name.
 func (s *ScheduleService) List(ctx context.Context, page domain.PageRequest) (domain.Page[domain.Schedule], error) {
-	if err := RequireScope(ctx, domain.ScopeAdmin); err != nil {
+	if err := RequireAnyScope(ctx, domain.ScopeAdmin, domain.ScopeDashboardRead); err != nil {
 		return domain.Page[domain.Schedule]{}, err
 	}
 	limit, err := domain.NormalizePageLimit(page.Limit)

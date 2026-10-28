@@ -284,3 +284,9 @@ LIMIT sqlc.arg(batch_limit);
 -- name: DeleteJobsByIDs :exec
 DELETE FROM jobs
 WHERE id = ANY(sqlc.arg(ids)::uuid[]);
+
+-- name: ListJobsBySchedule :many
+SELECT * FROM jobs
+WHERE idempotency_key LIKE sqlc.arg(prefix)::text || '%'
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(page_limit);

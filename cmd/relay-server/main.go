@@ -203,10 +203,19 @@ func runServe() error {
 		Metrics: httpMetrics.Middleware,
 		Tracing: true,
 	})
+	leadership := app.NewLeadership(cfg.InstanceID)
+	cachedStats := app.NewCachedQueueStats(queues, 2*time.Second)
 	handler := http.Handler(apiHandler)
 	if cfg.UIEnabled {
 		uiSrv, sessionKey, err := web.New(web.Options{
 			Auth:          auth,
+			Queues:        queues,
+			Jobs:          svc,
+			Schedules:     schedules,
+			CachedStats:   cachedStats,
+			Leadership:    leadership,
+			InstanceID:    cfg.InstanceID,
+			TraceURLTpl:   cfg.UITraceURLTemplate,
 			Logger:        log,
 			SessionKey:    cfg.UISessionKey,
 			SecureCookies: cfg.UISecureCookies,
@@ -240,7 +249,7 @@ func runServe() error {
 	}
 	scheduler := app.NewScheduler(scheduleRepo, svc, elector, cronParser, clock, app.SchedulerConfig{
 		Tick: cfg.SchedulerTick,
-	}, log).WithMetrics(bizMetrics).WithTracerProvider(otelTP)
+	}, log).WithMetrics(bizMetrics).WithTracerProvider(otelTP).WithLeadership(leadership)
 
 	grpcSrv := adaptergrpc.NewServer(adaptergrpc.Services{
 		Jobs:      svc,

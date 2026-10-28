@@ -85,6 +85,10 @@ type JobRepository interface {
 	// ListByStatus returns jobs in queue with status, ordered by updated_at DESC, id DESC (keyset).
 	ListByStatus(ctx context.Context, queue string, status domain.Status, page domain.PageRequest) (domain.Page[domain.Job], error)
 
+	// ListJobsBySchedule returns recent jobs fired by a schedule (newest first), capped at limit (max 100).
+	// Matching is by idempotency-key prefix schedule:{id}:.
+	ListJobsBySchedule(ctx context.Context, scheduleID domain.ScheduleID, limit int) ([]domain.Job, error)
+
 	// Ping checks connectivity (used by /readyz).
 	Ping(ctx context.Context) error
 }

@@ -29,6 +29,7 @@ func TestKeys(t *testing.T) {
 	assert.Equal(t, "relay:apikey:abc", k.APIKey("abc"))
 	assert.Equal(t, "relay:apikeys:by-prefix", k.APIKeysByPrefix())
 	assert.Equal(t, "relay:leader:scheduler", k.Leader("scheduler"))
+	assert.Equal(t, "relay:schedule:abc:jobs", k.ScheduleJobs("abc"))
 	assert.Equal(t, "relay:stats:default:1690000000", k.Stats("default", 1690000000))
 	assert.Equal(t, "relay:stats:*", k.StatsScanPattern())
 	assert.Equal(t, "default|abc", LeasedAllMember("default", "abc"))

@@ -2,6 +2,8 @@ package app_test
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -373,6 +375,25 @@ func (r *memRepo) ListByStatus(_ context.Context, queue string, status domain.St
 		items = items[:limit]
 	}
 	return domain.Page[domain.Job]{Items: items}, nil
+}
+
+func (r *memRepo) ListJobsBySchedule(_ context.Context, scheduleID domain.ScheduleID, limit int) ([]domain.Job, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	prefix := domain.FireIdempotencyPrefix(scheduleID)
+	var matched []domain.Job
+	for _, j := range r.jobs {
+		if strings.HasPrefix(j.IdempotencyKey, prefix) {
+			matched = append(matched, cloneJob(j))
+		}
+	}
+	sort.SliceStable(matched, func(i, k int) bool {
+		return matched[i].CreatedAt.After(matched[k].CreatedAt)
+	})
+	if limit > 0 && len(matched) > limit {
+		matched = matched[:limit]
+	}
+	return matched, nil
 }
 
 var _ app.JobRepository = (*memRepo)(nil)

@@ -1,0 +1,103 @@
+package templates
+
+templ JobPage(data JobDetailData) {
+	@Layout("Job "+shortID(data.Job.ID.String()), data.CSRF, true, jobBody(data))
+}
+
+templ jobBody(data JobDetailData) {
+	<div>
+		<nav class="text-sm text-zinc-600 dark:text-zinc-400" aria-label="Breadcrumb">
+			<a href="/ui/" class="no-underline">Overview</a>
+			<span aria-hidden="true"> / </span>
+			<a href={ SafePath("/ui/queues/" + data.Job.Queue) } class="no-underline">{ data.Job.Queue }</a>
+			<span aria-hidden="true"> / </span>
+			<span class="text-zinc-900 dark:text-zinc-100">Job</span>
+		</nav>
+		<div class="mt-4 flex flex-wrap items-start justify-between gap-3">
+			<div>
+				<h1 class="text-2xl font-semibold tracking-tight font-mono text-lg sm:text-2xl">{ data.Job.ID.String() }</h1>
+				<p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+					<span class="capitalize">{ string(data.Job.Status) }</span>
+					· { data.Job.Type }
+					· queue <a href={ SafePath("/ui/queues/" + data.Job.Queue) } class="no-underline">{ data.Job.Queue }</a>
+				</p>
+			</div>
+			if data.CanMutate {
+				<div class="flex gap-2">
+					if data.CanCancel {
+						<form method="post" action={ SafePath("/ui/jobs/" + data.Job.ID.String() + "/cancel") }>
+							<input type="hidden" name="csrf" value={ data.CSRF }/>
+							<button type="submit" class="cursor-pointer rounded border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700">Cancel</button>
+						</form>
+					}
+					if data.CanRetry {
+						<form method="post" action={ SafePath("/ui/jobs/" + data.Job.ID.String() + "/retry") }>
+							<input type="hidden" name="csrf" value={ data.CSRF }/>
+							<button type="submit" class="cursor-pointer rounded border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700">Retry</button>
+						</form>
+					}
+				</div>
+			}
+		</div>
+		<dl class="mt-6 grid gap-3 sm:grid-cols-2 text-sm">
+			@jobField("Priority", FormatInt64(int64(data.Job.Priority)))
+			@jobField("Attempts", fmtAttempts(data.Job.Attempts, data.Job.MaxAttempts))
+			@jobField("Run at", FormatTime(data.Job.RunAt))
+			@jobField("Created", FormatTime(data.Job.CreatedAt))
+			@jobField("Updated", FormatTime(data.Job.UpdatedAt))
+			@jobField("Finished", FormatTimePtr(data.Job.FinishedAt))
+			if data.Job.IdempotencyKey != "" {
+				@jobField("Idempotency key", data.Job.IdempotencyKey)
+			}
+			if data.Job.LastError != "" {
+				@jobField("Last error", data.Job.LastError)
+			}
+			if data.Job.LeaseOwner != "" {
+				@jobField("Lease owner", data.Job.LeaseOwner)
+			}
+			if data.TraceURL != "" {
+				<div>
+					<dt class="text-zinc-500">Trace</dt>
+					<dd class="mt-0.5"><a href={ SafePath(data.TraceURL) } rel="noopener noreferrer">Open in Jaeger</a></dd>
+				</div>
+			}
+		</dl>
+		<section class="mt-8">
+			<h2 class="text-lg font-medium">Payload</h2>
+			<pre class="mt-2 overflow-x-auto rounded border border-zinc-200 bg-zinc-50 p-3 text-xs leading-relaxed dark:border-zinc-800 dark:bg-zinc-900"><code class="language-json">{ data.Payload }</code></pre>
+		</section>
+		<section class="mt-8">
+			<h2 class="text-lg font-medium">Attempts</h2>
+			if len(data.Attempts) == 0 {
+				<p class="mt-2 text-sm text-zinc-600 dark:text-zinc-400">No attempts recorded yet.</p>
+			} else {
+				<ol class="mt-3 space-y-3">
+					for _, a := range data.Attempts {
+						<li class="rounded border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
+							<div class="flex flex-wrap justify-between gap-2">
+								<span class="font-medium">#{ FormatInt64(int64(a.Number)) } · { string(a.Outcome) }</span>
+								<span class="text-zinc-500">{ a.WorkerID }</span>
+							</div>
+							<p class="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
+								{ FormatTime(a.StartedAt) }
+								if a.FinishedAt != nil {
+									→ { FormatTime(*a.FinishedAt) }
+								}
+							</p>
+							if a.Error != "" {
+								<p class="mt-1 text-red-700 dark:text-red-300">{ a.Error }</p>
+							}
+						</li>
+					}
+				</ol>
+			}
+		</section>
+	</div>
+}
+
+templ jobField(label, value string) {
+	<div>
+		<dt class="text-zinc-500">{ label }</dt>
+		<dd class="mt-0.5 break-all">{ value }</dd>
+	</div>
+}

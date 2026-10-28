@@ -134,3 +134,29 @@ func NewSchedule(params NewScheduleParams, id ScheduleID, now time.Time, parser 
 func FireIdempotencyKey(id ScheduleID, fireAt time.Time) string {
 	return fmt.Sprintf("schedule:%s:%d", id.String(), fireAt.Unix())
 }
+
+// FireIdempotencyPrefix is the idempotency-key prefix for jobs fired by a schedule.
+func FireIdempotencyPrefix(id ScheduleID) string {
+	return fmt.Sprintf("schedule:%s:", id.String())
+}
+
+// ScheduleIDFromFireKey extracts the schedule id from a fire idempotency key.
+func ScheduleIDFromFireKey(key string) (ScheduleID, bool) {
+	const head = "schedule:"
+	if len(key) < len(head)+36+1 { // uuid + trailing ':'
+		return ScheduleID{}, false
+	}
+	if key[:len(head)] != head {
+		return ScheduleID{}, false
+	}
+	rest := key[len(head):]
+	// uuid is 36 chars then ':'
+	if len(rest) < 37 || rest[36] != ':' {
+		return ScheduleID{}, false
+	}
+	id, err := uuid.Parse(rest[:36])
+	if err != nil {
+		return ScheduleID{}, false
+	}
+	return ScheduleID(id), true
+}

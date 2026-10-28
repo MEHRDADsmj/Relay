@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	adaptercron "github.com/MEHRDADsmj/relay/internal/adapter/cron"
 	"github.com/MEHRDADsmj/relay/internal/adapter/storage/memory"
 	"github.com/MEHRDADsmj/relay/internal/adapter/web"
 	"github.com/MEHRDADsmj/relay/internal/app"
@@ -181,8 +182,13 @@ func TestUI_LoginCSRFRequired(t *testing.T) {
 }
 
 type uiTestEnv struct {
-	handler http.Handler
-	repo    *memory.Repository
+	handler   http.Handler
+	repo      *memory.Repository
+	jobs      *app.JobService
+	queues    *app.QueueService
+	schedules *app.ScheduleService
+	clock     *fixedClock
+	auth      *app.AuthService
 }
 
 func newUITestEnv(t *testing.T, bootstrap string) *uiTestEnv {
@@ -191,19 +197,39 @@ func newUITestEnv(t *testing.T, bootstrap string) *uiTestEnv {
 	clock := &fixedClock{now: time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	auth := app.NewAuthService(repo, clock, app.AuthServiceConfig{BootstrapKey: bootstrap}, log)
+	jobs := app.NewJobService(repo, clock, app.UUIDv7Generator{}, app.FixedDelayRetryPolicy{Delay: time.Second}, log, nil)
+	queues := app.NewQueueService(repo, repo, repo, clock)
+	schedules := app.NewScheduleService(repo, jobs, adaptercron.NewParser(), clock, app.UUIDv7Generator{})
+	cached := app.NewCachedQueueStats(queues, time.Hour)
+	lead := app.NewLeadership("test-instance")
 	key := make([]byte, 32)
 	for i := range key {
 		key[i] = byte(i + 1)
 	}
 	ui, _, err := web.New(web.Options{
 		Auth:          auth,
+		Queues:        queues,
+		Jobs:          jobs,
+		Schedules:     schedules,
+		CachedStats:   cached,
+		Leadership:    lead,
+		InstanceID:    "test-instance",
 		Logger:        log,
 		SessionKey:    key,
 		SecureCookies: false,
 		Clock:         clock.Now,
+		SSEInterval:   50 * time.Millisecond,
 	})
 	require.NoError(t, err)
-	return &uiTestEnv{handler: ui.Handler(), repo: repo}
+	return &uiTestEnv{
+		handler:   ui.Handler(),
+		repo:      repo,
+		jobs:      jobs,
+		queues:    queues,
+		schedules: schedules,
+		clock:     clock,
+		auth:      auth,
+	}
 }
 
 func (e *uiTestEnv) do(t *testing.T, method, path string, form url.Values, cookies []*http.Cookie) *httptest.ResponseRecorder {

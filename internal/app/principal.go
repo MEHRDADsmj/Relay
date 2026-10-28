@@ -37,3 +37,17 @@ func RequireScope(ctx context.Context, scope domain.Scope) error {
 	}
 	return nil
 }
+
+// RequireAnyScope ensures the principal holds at least one of the given scopes.
+func RequireAnyScope(ctx context.Context, scopes ...domain.Scope) error {
+	p, ok := PrincipalFrom(ctx)
+	if !ok {
+		return domain.ErrUnauthenticated
+	}
+	for _, scope := range scopes {
+		if p.Can(scope) {
+			return nil
+		}
+	}
+	return domain.ErrForbidden
+}

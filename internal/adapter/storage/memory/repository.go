@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -552,6 +553,39 @@ func (r *Repository) ListByStatus(_ context.Context, queue string, status domain
 		items[i] = cloneJob(matched[i])
 	}
 	return domain.Page[domain.Job]{Items: items, NextCursor: nextCursor}, nil
+}
+
+// ListJobsBySchedule implements app.JobRepository.
+func (r *Repository) ListJobsBySchedule(_ context.Context, scheduleID domain.ScheduleID, limit int) ([]domain.Job, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	prefix := domain.FireIdempotencyPrefix(scheduleID)
+	matched := make([]domain.Job, 0)
+	for _, j := range r.jobs {
+		if strings.HasPrefix(j.IdempotencyKey, prefix) {
+			matched = append(matched, j)
+		}
+	}
+	sort.SliceStable(matched, func(i, k int) bool {
+		if !matched[i].CreatedAt.Equal(matched[k].CreatedAt) {
+			return matched[i].CreatedAt.After(matched[k].CreatedAt)
+		}
+		return matched[i].ID.String() > matched[k].ID.String()
+	})
+	if len(matched) > limit {
+		matched = matched[:limit]
+	}
+	out := make([]domain.Job, len(matched))
+	for i := range matched {
+		out[i] = cloneJob(matched[i])
+	}
+	return out, nil
 }
 
 // Ping implements app.JobRepository.

@@ -69,6 +69,10 @@ func (r *errRepo) ListByStatus(context.Context, string, domain.Status, domain.Pa
 	return domain.Page[domain.Job]{}, errRepoBoom
 }
 
+func (r *errRepo) ListJobsBySchedule(context.Context, domain.ScheduleID, int) ([]domain.Job, error) {
+	return nil, errRepoBoom
+}
+
 func (r *errRepo) Ping(context.Context) error { return errRepoBoom }
 
 func TestService_RepoErrorsWrapped(t *testing.T) {
