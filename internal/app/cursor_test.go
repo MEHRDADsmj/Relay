@@ -39,6 +39,7 @@ func TestEncodeDecodeCursor_RoundTrip(t *testing.T) {
 func TestDecodeCursor_Invalid(t *testing.T) {
 	t.Parallel()
 
+	validID := "44444444-4444-4444-4444-444444444444"
 	tests := []struct {
 		name   string
 		cursor string
@@ -48,6 +49,11 @@ func TestDecodeCursor_Invalid(t *testing.T) {
 		{name: "not json", cursor: base64.RawURLEncoding.EncodeToString([]byte("abc"))},
 		{name: "missing fields", cursor: base64.RawURLEncoding.EncodeToString([]byte(`{"x":1}`))},
 		{name: "bad uuid", cursor: base64.RawURLEncoding.EncodeToString([]byte(`{"t":1,"id":"not-a-uuid"}`))},
+		{name: "missing t", cursor: base64.RawURLEncoding.EncodeToString([]byte(`{"id":"` + validID + `"}`))},
+		{name: "t zero", cursor: base64.RawURLEncoding.EncodeToString([]byte(`{"t":0,"id":"` + validID + `"}`))},
+		{name: "missing id", cursor: base64.RawURLEncoding.EncodeToString([]byte(`{"t":1}`))},
+		{name: "empty id", cursor: base64.RawURLEncoding.EncodeToString([]byte(`{"t":1,"id":""}`))},
+		{name: "nil uuid", cursor: base64.RawURLEncoding.EncodeToString([]byte(`{"t":1,"id":"00000000-0000-0000-0000-000000000000"}`))},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
