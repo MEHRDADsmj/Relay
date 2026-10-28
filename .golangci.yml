@@ -1,0 +1,142 @@
+version: "2"
+
+run:
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+    - revive
+    - gosec
+    - bodyclose
+    - noctx
+    - errorlint
+    - contextcheck
+    - depguard
+    - gocritic
+    - misspell
+    - nolintlint
+  settings:
+    revive:
+      rules:
+        - name: package-comments
+        - name: exported
+          disabled: true
+    depguard:
+      rules:
+        # Domain: stdlib + google/uuid only; never net/http or infra.
+        domain:
+          list-mode: strict
+          files:
+            - "**/internal/domain/*.go"
+            - "**/internal/domain/**/*.go"
+          allow:
+            - $gostd
+            - github.com/google/uuid
+          deny:
+            - pkg: net/http
+              desc: domain must not import net/http
+            - pkg: github.com/MEHRDADsmj/relay/
+              desc: domain must not import other packages in this module
+            - pkg: github.com/jackc/pgx
+              desc: domain must not import pgx
+            - pkg: github.com/redis/go-redis
+              desc: domain must not import redis
+            - pkg: github.com/go-chi/chi
+              desc: domain must not import chi
+        # Application: domain + stdlib; no adapters / net/http / infra drivers.
+        app:
+          list-mode: lax
+          files:
+            - "**/internal/app/*.go"
+            - "**/internal/app/**/*.go"
+          deny:
+            - pkg: net/http
+              desc: app must not import net/http
+            - pkg: github.com/MEHRDADsmj/relay/internal/adapter
+              desc: app must not import adapters
+            - pkg: github.com/MEHRDADsmj/relay/internal/platform
+              desc: app must not import platform
+            - pkg: github.com/jackc/pgx
+              desc: app must not import pgx
+            - pkg: github.com/redis/go-redis
+              desc: app must not import redis
+            - pkg: github.com/go-chi/chi
+              desc: app must not import chi
+        # Adapters must not import sibling adapters.
+        http-adapter:
+          list-mode: lax
+          files:
+            - "**/internal/adapter/http/*.go"
+            - "**/internal/adapter/http/**/*.go"
+            - "!**/internal/adapter/http/oapi/**"
+          deny:
+            - pkg: github.com/MEHRDADsmj/relay/internal/adapter/storage
+              desc: http adapter must not import storage adapters
+        postgres-adapter:
+          list-mode: lax
+          files:
+            - "**/internal/adapter/storage/postgres/*.go"
+            - "**/internal/adapter/storage/postgres/**/*.go"
+            - "!**/internal/adapter/storage/postgres/sqlcgen/**"
+          deny:
+            - pkg: github.com/MEHRDADsmj/relay/internal/adapter/http
+              desc: postgres must not import http adapter
+            - pkg: github.com/MEHRDADsmj/relay/internal/adapter/storage/redis
+              desc: postgres must not import redis adapter
+        redis-adapter:
+          list-mode: lax
+          files:
+            - "**/internal/adapter/storage/redis/*.go"
+            - "**/internal/adapter/storage/redis/**/*.go"
+          deny:
+            - pkg: github.com/MEHRDADsmj/relay/internal/adapter/http
+              desc: redis must not import http adapter
+            - pkg: github.com/MEHRDADsmj/relay/internal/adapter/storage/postgres
+              desc: redis must not import postgres adapter
+        # Platform: no domain/app/adapters.
+        platform:
+          list-mode: lax
+          files:
+            - "**/internal/platform/*.go"
+            - "**/internal/platform/**/*.go"
+          deny:
+            - pkg: github.com/MEHRDADsmj/relay/internal/domain
+              desc: platform must not import domain
+            - pkg: github.com/MEHRDADsmj/relay/internal/app
+              desc: platform must not import app
+            - pkg: github.com/MEHRDADsmj/relay/internal/adapter
+              desc: platform must not import adapters
+        # SDK: never imports internal/.
+        sdk:
+          list-mode: lax
+          files:
+            - "**/pkg/sdk/*.go"
+            - "**/pkg/sdk/**/*.go"
+          deny:
+            - pkg: github.com/MEHRDADsmj/relay/internal
+              desc: sdk must not import internal packages
+  exclusions:
+    generated: lax
+    paths:
+      - internal/adapter/storage/postgres/sqlcgen
+      - internal/adapter/http/oapi
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/MEHRDADsmj/relay
+  exclusions:
+    generated: lax
+    paths:
+      - internal/adapter/storage/postgres/sqlcgen
+      - internal/adapter/http/oapi
