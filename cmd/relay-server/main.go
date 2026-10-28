@@ -122,6 +122,19 @@ func runServe() error {
 		// WriteTimeout must exceed max lease wait_seconds; see phase-2 §5.
 		WriteTimeout: cfg.LeaseMaxWait + 15*time.Second,
 		IdleTimeout:  60 * time.Second,
+		// Cancel in-flight request contexts (incl. LeaseWait long-polls) on SIGTERM so
+		// Shutdown does not wait out LeaseMaxWait. Handler maps context.Canceled → 200 empty.
+		BaseContext: func(_ net.Listener) context.Context {
+			return ctx
+		},
+	}
+	if cfg.ShutdownTimeout < cfg.LeaseMaxWait {
+		// With BaseContext, long-polls cancel immediately; still warn if drain budget is
+		// shorter than the configured max wait (operators may expect the old behaviour).
+		log.Warn("RELAY_SHUTDOWN_TIMEOUT is less than RELAY_LEASE_MAX_WAIT; BaseContext cancels long-polls on shutdown",
+			"shutdown_timeout", cfg.ShutdownTimeout,
+			"lease_max_wait", cfg.LeaseMaxWait,
+		)
 	}
 
 	// Maintenance uses a child context cancelled only after HTTP shutdown so

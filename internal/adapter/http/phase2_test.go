@@ -3,6 +3,8 @@ package http_test
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -403,6 +405,78 @@ func TestLease_LongPollClientDisconnect(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, "disconnect must not be 500")
 	var lease map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &lease))
+	jobs, ok := lease["jobs"].([]any)
+	require.True(t, ok)
+	require.Empty(t, jobs)
+}
+
+func TestLease_LongPollBaseContextCancel(t *testing.T) {
+	// Mirrors cmd/relay-server BaseContext: cancelling the serve ctx must unblock
+	// in-flight LeaseWait so Shutdown does not wait out wait_seconds.
+	t.Parallel()
+	h, _ := testRouter(t, "")
+
+	baseCtx, cancelBase := context.WithCancel(context.Background())
+	defer cancelBase()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	srv := &http.Server{
+		Handler: h,
+		BaseContext: func(_ net.Listener) context.Context {
+			return baseCtx
+		},
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      45 * time.Second,
+	}
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.Serve(ln) }()
+	t.Cleanup(func() {
+		shCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shCtx)
+		<-serveErr
+	})
+
+	type result struct {
+		status  int
+		body    []byte
+		elapsed time.Duration
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		start := time.Now()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+			"http://"+ln.Addr().String()+"/v1/queues/default/leases",
+			strings.NewReader(`{"worker_id":"w1","wait_seconds":30}`))
+		if err != nil {
+			done <- result{err: err, elapsed: time.Since(start)}
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		res, err := http.DefaultClient.Do(req)
+		elapsed := time.Since(start)
+		if err != nil {
+			done <- result{err: err, elapsed: elapsed}
+			return
+		}
+		defer func() { _ = res.Body.Close() }()
+		body, _ := io.ReadAll(res.Body)
+		done <- result{status: res.StatusCode, body: body, elapsed: elapsed}
+	}()
+
+	time.Sleep(200 * time.Millisecond) // ensure long-poll is blocked in LeaseWait
+	cancelBase()
+
+	got := <-done
+	require.NoError(t, got.err)
+	require.Less(t, got.elapsed, 2*time.Second, "long-poll must return promptly when BaseContext cancels")
+	require.Equal(t, http.StatusOK, got.status)
+	var lease map[string]any
+	require.NoError(t, json.Unmarshal(got.body, &lease))
 	jobs, ok := lease["jobs"].([]any)
 	require.True(t, ok)
 	require.Empty(t, jobs)

@@ -46,7 +46,7 @@ services:
       RELAY_REDIS_KEY_PREFIX: relay
       RELAY_MIGRATE_ON_START: "true"
       RELAY_RETRY_DELAY: 5s
-      RELAY_SHUTDOWN_TIMEOUT: 15s
+      RELAY_SHUTDOWN_TIMEOUT: 45s
       RELAY_LOG_LEVEL: info
       RELAY_LOG_FORMAT: json
     depends_on:

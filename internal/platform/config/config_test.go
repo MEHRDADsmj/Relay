@@ -28,7 +28,7 @@ func TestLoad_Defaults(t *testing.T) {
 	require.Equal(t, 1000, cfg.PurgeBatch)
 	require.Equal(t, 168*time.Hour, cfg.Retention)
 	require.Equal(t, 30*time.Second, cfg.LeaseMaxWait)
-	require.Equal(t, 15*time.Second, cfg.ShutdownTimeout)
+	require.Equal(t, 45*time.Second, cfg.ShutdownTimeout)
 	require.Equal(t, "info", cfg.LogLevel)
 	require.Equal(t, "json", cfg.LogFormat)
 }

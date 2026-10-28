@@ -48,25 +48,26 @@ type Config struct {
 // All validation errors are collected and returned together.
 func Load() (Config, error) {
 	cfg := Config{
-		HTTPAddr:        envOr("RELAY_HTTP_ADDR", ":7420"),
-		Storage:         strings.ToLower(envOr("RELAY_STORAGE", StoragePostgres)),
-		PostgresURL:     os.Getenv("RELAY_POSTGRES_URL"),
-		RedisURL:        os.Getenv("RELAY_REDIS_URL"),
-		RedisKeyPrefix:  envOr("RELAY_REDIS_KEY_PREFIX", "relay"),
-		APIKey:          os.Getenv("RELAY_API_KEY"),
-		LogLevel:        strings.ToLower(envOr("RELAY_LOG_LEVEL", "info")),
-		LogFormat:       strings.ToLower(envOr("RELAY_LOG_FORMAT", "json")),
-		RetryPolicy:     strings.ToLower(envOr("RELAY_RETRY_POLICY", RetryPolicyExponential)),
-		RetryBase:       time.Second,
-		RetryMax:        time.Hour,
-		RetryDelay:      5 * time.Second, // Phase 1 default; remapped below if unset overrides
-		ReapInterval:    5 * time.Second,
-		ReapBatch:       500,
-		PurgeInterval:   time.Minute,
-		PurgeBatch:      1000,
-		Retention:       168 * time.Hour,
-		LeaseMaxWait:    30 * time.Second,
-		ShutdownTimeout: 15 * time.Second,
+		HTTPAddr:       envOr("RELAY_HTTP_ADDR", ":7420"),
+		Storage:        strings.ToLower(envOr("RELAY_STORAGE", StoragePostgres)),
+		PostgresURL:    os.Getenv("RELAY_POSTGRES_URL"),
+		RedisURL:       os.Getenv("RELAY_REDIS_URL"),
+		RedisKeyPrefix: envOr("RELAY_REDIS_KEY_PREFIX", "relay"),
+		APIKey:         os.Getenv("RELAY_API_KEY"),
+		LogLevel:       strings.ToLower(envOr("RELAY_LOG_LEVEL", "info")),
+		LogFormat:      strings.ToLower(envOr("RELAY_LOG_FORMAT", "json")),
+		RetryPolicy:    strings.ToLower(envOr("RELAY_RETRY_POLICY", RetryPolicyExponential)),
+		RetryBase:      time.Second,
+		RetryMax:       time.Hour,
+		RetryDelay:     5 * time.Second, // Phase 1 default; remapped below if unset overrides
+		ReapInterval:   5 * time.Second,
+		ReapBatch:      500,
+		PurgeInterval:  time.Minute,
+		PurgeBatch:     1000,
+		Retention:      168 * time.Hour,
+		LeaseMaxWait:   30 * time.Second,
+		// ShutdownTimeout default = LeaseMaxWait + 15s margin (BaseContext still cancels long-polls on SIGTERM).
+		ShutdownTimeout: 45 * time.Second,
 	}
 
 	var errs []string
