@@ -85,15 +85,17 @@ func runServe() error {
 		}
 	}
 
+	clock := app.SystemClock{}
 	svc := app.NewJobService(
 		repo,
-		app.SystemClock{},
+		clock,
 		app.UUIDv7Generator{},
 		app.FixedDelayRetryPolicy{Delay: cfg.RetryDelay},
 		log,
 		nil, // notifier wired in P2-T7
 	)
-	handler := adapterhttp.NewRouter(svc, adapterhttp.Options{
+	queues := app.NewQueueService(mustQueueRepo(repo), repo, clock)
+	handler := adapterhttp.NewRouter(svc, queues, adapterhttp.Options{
 		APIKey: cfg.APIKey,
 		Logger: log,
 	})
@@ -103,8 +105,9 @@ func runServe() error {
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      15 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		// WriteTimeout must exceed max lease wait_seconds (30s); see phase-2 §5.
+		WriteTimeout: 45 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -155,6 +158,15 @@ func openRepository(ctx context.Context, cfg config.Config, log *slog.Logger) (a
 	default:
 		return nil, nil, fmt.Errorf("unsupported storage %q", cfg.Storage)
 	}
+}
+
+// mustQueueRepo asserts the job repository also implements QueueRepository (all backends do).
+func mustQueueRepo(repo app.JobRepository) app.QueueRepository {
+	q, ok := repo.(app.QueueRepository)
+	if !ok {
+		panic(fmt.Sprintf("%T does not implement app.QueueRepository", repo))
+	}
+	return q
 }
 
 func migrateOnStart(ctx context.Context, cfg config.Config, log *slog.Logger) error {

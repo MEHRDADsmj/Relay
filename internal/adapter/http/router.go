@@ -21,7 +21,7 @@ type Options struct {
 }
 
 // NewRouter builds the chi router with middleware and OpenAPI routes.
-func NewRouter(svc *app.JobService, opts Options) http.Handler {
+func NewRouter(jobs *app.JobService, queues *app.QueueService, opts Options) http.Handler {
 	log := opts.Logger
 	if log == nil {
 		log = slog.Default()
@@ -40,7 +40,7 @@ func NewRouter(svc *app.JobService, opts Options) http.Handler {
 	r.Use(BodyLimit(maxBody))
 	r.Use(Auth(opts.APIKey))
 
-	h := NewHandler(svc, log)
+	h := NewHandler(jobs, queues, log)
 	strict := oapi.NewStrictHandlerWithOptions(h, nil, oapi.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  requestErrorHandler,
 		ResponseErrorHandlerFunc: responseErrorHandler(log),

@@ -11,7 +11,9 @@ import (
 )
 
 const (
-	problemTypeBase = "about:blank"
+	problemTypeBlank             = "about:blank"
+	problemTypeLeaseLost         = "https://relay.dev/problems/lease-lost"
+	problemTypeInvalidTransition = "https://relay.dev/problems/invalid-transition"
 
 	titleBadRequest         = "Bad Request"
 	titleUnauthorized       = "Unauthorized"
@@ -32,9 +34,12 @@ type problem struct {
 	Errors   []oapi.FieldError `json:"errors,omitempty"`
 }
 
-func writeProblem(w http.ResponseWriter, status int, title, detail string, fieldErrors []oapi.FieldError) {
+func writeProblem(w http.ResponseWriter, status int, problemType, title, detail string, fieldErrors []oapi.FieldError) {
+	if problemType == "" {
+		problemType = problemTypeBlank
+	}
 	p := problem{
-		Type:   problemTypeBase,
+		Type:   problemType,
 		Title:  title,
 		Status: status,
 		Detail: detail,
@@ -46,37 +51,44 @@ func writeProblem(w http.ResponseWriter, status int, title, detail string, field
 }
 
 func writeUnauthorized(w http.ResponseWriter) {
-	writeProblem(w, http.StatusUnauthorized, titleUnauthorized, "missing or invalid API key", nil)
+	writeProblem(w, http.StatusUnauthorized, problemTypeBlank, titleUnauthorized, "missing or invalid API key", nil)
 }
 
 func writePayloadTooLarge(w http.ResponseWriter) {
-	writeProblem(w, http.StatusRequestEntityTooLarge, titlePayloadTooLarge, "request body exceeds 1 MiB", nil)
+	writeProblem(w, http.StatusRequestEntityTooLarge, problemTypeBlank, titlePayloadTooLarge, "request body exceeds 1 MiB", nil)
 }
 
 func writeInternal(w http.ResponseWriter) {
-	writeProblem(w, http.StatusInternalServerError, titleInternalError, "an unexpected error occurred", nil)
+	writeProblem(w, http.StatusInternalServerError, problemTypeBlank, titleInternalError, "an unexpected error occurred", nil)
 }
 
-func mapDomainError(err error) (status int, title, detail string, fieldErrors []oapi.FieldError) {
+func mapDomainError(err error) (status int, problemType, title, detail string, fieldErrors []oapi.FieldError) {
 	var ve *domain.ValidationError
 	if errors.As(err, &ve) {
 		field := ve.Field
-		if field == "lease_duration" {
+		switch field {
+		case "lease_duration":
 			field = "lease_seconds"
+		case "wait":
+			field = "wait_seconds"
 		}
-		return http.StatusBadRequest, titleBadRequest, "validation failed", []oapi.FieldError{
+		return http.StatusBadRequest, problemTypeBlank, titleBadRequest, "validation failed", []oapi.FieldError{
 			{Field: field, Message: ve.Message},
 		}
 	}
 	switch {
 	case errors.Is(err, domain.ErrValidation):
-		return http.StatusBadRequest, titleBadRequest, "validation failed", nil
+		return http.StatusBadRequest, problemTypeBlank, titleBadRequest, "validation failed", nil
 	case errors.Is(err, domain.ErrNotFound):
-		return http.StatusNotFound, titleNotFound, "resource not found", nil
-	case errors.Is(err, domain.ErrLeaseLost), errors.Is(err, domain.ErrConflict):
-		return http.StatusConflict, titleConflict, "lease lost or conflict", nil
+		return http.StatusNotFound, problemTypeBlank, titleNotFound, "resource not found", nil
+	case errors.Is(err, domain.ErrLeaseLost):
+		return http.StatusConflict, problemTypeLeaseLost, titleConflict, "lease lost", nil
+	case errors.Is(err, domain.ErrInvalidTransition):
+		return http.StatusConflict, problemTypeInvalidTransition, titleConflict, "invalid transition", nil
+	case errors.Is(err, domain.ErrConflict):
+		return http.StatusConflict, problemTypeBlank, titleConflict, "conflict", nil
 	default:
-		return http.StatusInternalServerError, titleInternalError, "an unexpected error occurred", nil
+		return http.StatusInternalServerError, problemTypeBlank, titleInternalError, "an unexpected error occurred", nil
 	}
 }
 
@@ -85,27 +97,27 @@ func requestErrorHandler(w http.ResponseWriter, _ *http.Request, err error) {
 		writePayloadTooLarge(w)
 		return
 	}
-	writeProblem(w, http.StatusBadRequest, titleBadRequest, err.Error(), nil)
+	writeProblem(w, http.StatusBadRequest, problemTypeBlank, titleBadRequest, err.Error(), nil)
 }
 
 func responseErrorHandler(log *slog.Logger) func(http.ResponseWriter, *http.Request, error) {
 	return func(w http.ResponseWriter, r *http.Request, err error) {
-		status, title, detail, fields := mapDomainError(err)
+		status, problemType, title, detail, fields := mapDomainError(err)
 		if status >= http.StatusInternalServerError {
 			log.ErrorContext(r.Context(), "request failed", "err", err, "request_id", RequestIDFromContext(r.Context()), "path", r.URL.Path)
 		}
-		writeProblem(w, status, title, detail, fields)
+		writeProblem(w, status, problemType, title, detail, fields)
 	}
 }
 
 func chiErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
 	// Path/param binding failures are client errors.
-	writeProblem(w, http.StatusBadRequest, titleBadRequest, err.Error(), nil)
+	writeProblem(w, http.StatusBadRequest, problemTypeBlank, titleBadRequest, err.Error(), nil)
 }
 
 func readinessProblem() oapi.Problem {
 	return oapi.Problem{
-		Type:   problemTypeBase,
+		Type:   problemTypeBlank,
 		Title:  titleServiceUnavailable,
 		Status: http.StatusServiceUnavailable,
 		Detail: ptr("storage unavailable"),

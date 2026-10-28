@@ -121,15 +121,19 @@ func runE2E(t *testing.T, start func(*testing.T, context.Context) backend) {
 	t.Cleanup(b.cleanup)
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	clock := app.SystemClock{}
 	svc := app.NewJobService(
 		b.repo,
-		app.SystemClock{},
+		clock,
 		app.UUIDv7Generator{},
 		app.FixedDelayRetryPolicy{Delay: retryDelay},
 		log,
 		nil,
 	)
-	handler := adapterhttp.NewRouter(svc, adapterhttp.Options{
+	queueRepo, ok := b.repo.(app.QueueRepository)
+	require.True(t, ok, "backend must implement QueueRepository")
+	queues := app.NewQueueService(queueRepo, b.repo, clock)
+	handler := adapterhttp.NewRouter(svc, queues, adapterhttp.Options{
 		APIKey: apiKey,
 		Logger: log,
 	})
