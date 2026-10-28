@@ -210,8 +210,17 @@ shutdown:
 	case <-waitDone:
 		return nil
 	case <-timer.C:
+		// Force-cancel job contexts, then wait a secondary bound for watchers to
+		// release. processJob must not block forever on handlers that ignore
+		// cancel; those invoke goroutines may be abandoned until they return.
 		cancelJobs()
-		<-waitDone
+		secondary := time.NewTimer(w.opts.ShutdownTimeout)
+		defer secondary.Stop()
+		select {
+		case <-waitDone:
+		case <-secondary.C:
+			w.opts.Logger.Warn("shutdown: abandoning wait for in-flight jobs that ignore cancel")
+		}
 		return ErrShutdownTimeout
 	}
 }
@@ -252,14 +261,30 @@ func (w *Worker) processJob(workerCtx context.Context, job apiJob, leaseSeconds 
 			}
 			if errors.Is(err, ErrLeaseLost) {
 				cancel()
-				<-resultCh //nolint:errcheck // drain handler; lease lost — do not report
+				drainResult(resultCh, w.opts.ShutdownTimeout)
 				return
 			}
 			w.opts.Logger.Error("heartbeat failed", "job_id", job.ID, "err", err)
 		case <-workerCtx.Done():
-			<-resultCh //nolint:errcheck // drain handler after shutdown cancel
+			// Bound the wait so a handler that ignores cancel cannot hang Run.
+			drainResult(resultCh, w.opts.ShutdownTimeout)
 			return
 		}
+	}
+}
+
+// drainResult waits up to bound for the handler result, then returns so the
+// job watcher can release WaitGroup slots. If the handler is still running,
+// its goroutine is abandoned until it returns (buffered send will not block).
+func drainResult(resultCh <-chan error, bound time.Duration) {
+	if bound <= 0 {
+		bound = time.Second
+	}
+	t := time.NewTimer(bound)
+	defer t.Stop()
+	select {
+	case <-resultCh: //nolint:errcheck // draining abandoned or finishing handler
+	case <-t.C:
 	}
 }
 

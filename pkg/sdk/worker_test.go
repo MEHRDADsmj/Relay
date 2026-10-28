@@ -522,6 +522,63 @@ func TestWorker_ShutdownTimeout(t *testing.T) {
 	require.True(t, errors.Is(err, sdk.ErrShutdownTimeout), "got %v", err)
 }
 
+func TestWorker_ShutdownTimeoutDespiteIgnoringCancel(t *testing.T) {
+	t.Parallel()
+	api := &fakeAPI{}
+	var once sync.Once
+	api.leaseFn = func(string, map[string]any) (int, []map[string]any) {
+		var jobs []map[string]any
+		once.Do(func() {
+			jobs = []map[string]any{jobWire("aaaaaaaa-bbbb-cccc-dddd-000000000010", "default", "demo", map[string]any{"n": 1}, 1)}
+		})
+		return http.StatusOK, jobs
+	}
+	api.heartbeatFn = func(string, map[string]any) (int, map[string]any) {
+		return http.StatusOK, sampleJob("aaaaaaaa-bbbb-cccc-dddd-000000000010", nil)
+	}
+
+	srv := api.start(t)
+	c := sdk.NewClient(srv.URL)
+	w, err := sdk.NewWorker(c, sdk.WorkerOptions{
+		Queue:           "default",
+		WorkerID:        "w1",
+		Concurrency:     1,
+		LeaseDuration:   time.Second,
+		PollMinInterval: 5 * time.Millisecond,
+		PollMaxInterval: 20 * time.Millisecond,
+		ShutdownTimeout: 40 * time.Millisecond,
+	})
+	require.NoError(t, err)
+
+	release := make(chan struct{})
+	started := make(chan struct{})
+	var handlerDone sync.WaitGroup
+	handlerDone.Add(1)
+	sdk.Handle(w, "demo", func(context.Context, sdk.Job[demoArgs]) error {
+		defer handlerDone.Done()
+		close(started)
+		<-release // ignores job context cancel on purpose
+		return nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- w.Run(ctx) }()
+	<-started
+	cancel()
+
+	select {
+	case err := <-done:
+		require.True(t, errors.Is(err, sdk.ErrShutdownTimeout), "got %v", err)
+	case <-time.After(500 * time.Millisecond):
+		close(release)
+		handlerDone.Wait()
+		t.Fatal("Run hung after ShutdownTimeout while handler ignored cancel")
+	}
+	close(release) // let abandoned handler exit so goleak passes
+	handlerDone.Wait()
+}
+
 func TestWorker_LeaseTransportErrorsKeepRunning(t *testing.T) {
 	t.Parallel()
 	api := &fakeAPI{}
